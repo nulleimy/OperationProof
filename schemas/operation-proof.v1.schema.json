@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/operation-proof.v1.schema.json",
+  "title": "OperationProof v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "phase", "operation_id", "decision", "reason_codes", "evidence", "proof_digest"],
+  "properties": {
+    "schema": {"const": "operationproof.operation-proof.v1"},
+    "phase": {"enum": ["PRE", "FINAL"]},
+    "operation_id": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["VERIFIED", "REJECTED"]},
+    "reason_codes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "pre_proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "pre_proof": {"type": "object"},
+    "evidence": {"type": "array", "items": {"$ref": "evidence-envelope.v1.schema.json"}},
+    "proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "FINAL"}}},
+      "then": {"required": ["pre_proof_digest", "pre_proof"]}
+    }
+  ]
+}
