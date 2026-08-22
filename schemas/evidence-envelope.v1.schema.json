@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/evidence-envelope.v1.schema.json",
+  "title": "OperationProof Evidence Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "layer", "provider", "operation_id", "decision", "verdict",
+    "subject_digest", "evidence_digest", "issued_at", "expires_at", "metadata"
+  ],
+  "properties": {
+    "schema": {"const": "operationproof.evidence-envelope.v1"},
+    "layer": {
+      "enum": ["identity", "authorization", "intent", "continuity", "tool_safety", "data_flow", "resource", "execution"]
+    },
+    "provider": {"type": "string", "minLength": 1},
+    "operation_id": {"type": "string", "minLength": 1},
+    "decision": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["PASS", "FAIL", "UNKNOWN"]},
+    "subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"},
+    "metadata": {"type": "object"}
+  }
+}
