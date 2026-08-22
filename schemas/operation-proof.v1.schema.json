@@ -12,13 +12,14 @@
     "decision": {"enum": ["VERIFIED", "REJECTED"]},
     "reason_codes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
     "pre_proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "pre_proof": {"type": "object"},
     "evidence": {"type": "array", "items": {"$ref": "evidence-envelope.v1.schema.json"}},
     "proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
   },
   "allOf": [
     {
       "if": {"properties": {"phase": {"const": "FINAL"}}},
-      "then": {"required": ["pre_proof_digest"]}
+      "then": {"required": ["pre_proof_digest", "pre_proof"]}
     }
   ]
 }

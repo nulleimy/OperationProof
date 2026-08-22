@@ -24,7 +24,7 @@ The verifier rejects or refuses to verify when it encounters:
 - evidence bound to another operation;
 - expired evidence;
 - a proof digest mismatch;
-- a Final proof bound to an invalid or rejected Pre proof.
+- a Final proof bound to an invalid, rejected, missing, or digest-mismatched Pre proof.
 
 ## Trust boundaries
 

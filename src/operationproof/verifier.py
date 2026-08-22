@@ -28,6 +28,7 @@ def evaluate_evidence_set(
     evidence: list[dict[str, Any]],
     required_layers: set[str],
     forbidden_layers: set[str] | None = None,
+    allowed_layers: set[str] | None = None,
     now: datetime | None = None,
 ) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
@@ -43,6 +44,8 @@ def evaluate_evidence_set(
 
         if layer in forbidden_layers:
             reasons.append(f"FORBIDDEN_LAYER:{layer}")
+        if allowed_layers is not None and layer not in allowed_layers:
+            reasons.append(f"UNEXPECTED_LAYER:{layer}")
         if item.get("operation_id") != operation_id:
             reasons.append(f"OPERATION_ID_MISMATCH:{layer}")
         if item.get("verdict") == "FAIL":
@@ -53,6 +56,12 @@ def evaluate_evidence_set(
         for digest_field in ("subject_digest", "evidence_digest"):
             if not valid_digest(str(item.get(digest_field, ""))):
                 reasons.append(f"INVALID_DIGEST:{layer}:{digest_field}")
+
+        issued_at = item.get("issued_at")
+        try:
+            _parse_time(str(issued_at))
+        except (TypeError, ValueError):
+            reasons.append(f"INVALID_ISSUED_AT:{layer}")
 
         expires_at = item.get("expires_at")
         if expires_at:
@@ -69,59 +78,118 @@ def evaluate_evidence_set(
     return decision, sorted(set(reasons))
 
 
-def verify_proof(proof: dict[str, Any]) -> VerificationResult:
+def evaluate_pre_semantics(
+    operation_id: str,
+    evidence: list[dict[str, Any]],
+) -> tuple[ProofDecision, list[str]]:
+    return evaluate_evidence_set(
+        operation_id=operation_id,
+        evidence=evidence,
+        required_layers={layer.value for layer in PRE_LAYERS},
+        forbidden_layers={Layer.EXECUTION.value},
+        allowed_layers={layer.value for layer in PRE_LAYERS},
+    )
+
+
+def evaluate_final_semantics(
+    *,
+    operation_id: Any,
+    pre_proof: Any,
+    pre_digest: Any,
+    evidence: list[dict[str, Any]],
+) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
+
+    if not isinstance(operation_id, str) or not operation_id:
+        reasons.append("INVALID_OPERATION_ID")
+
+    if not isinstance(pre_proof, dict):
+        reasons.append("PRE_PROOF_MISSING")
+    else:
+        pre_result = verify_proof(pre_proof)
+        if not pre_result.valid:
+            reasons.append("PRE_PROOF_INVALID")
+        if pre_proof.get("phase") != "PRE":
+            reasons.append("PRE_PROOF_PHASE_INVALID")
+        if pre_proof.get("decision") != ProofDecision.VERIFIED.value:
+            reasons.append("PRE_PROOF_NOT_VERIFIED")
+        if pre_proof.get("operation_id") != operation_id:
+            reasons.append("PRE_PROOF_OPERATION_ID_MISMATCH")
+        if pre_proof.get("proof_digest") != pre_digest:
+            reasons.append("PRE_PROOF_DIGEST_MISMATCH")
+
+    if not valid_digest(str(pre_digest or "")):
+        reasons.append("INVALID_PRE_PROOF_DIGEST")
+
+    if isinstance(operation_id, str):
+        _, execution_reasons = evaluate_evidence_set(
+            operation_id=operation_id,
+            evidence=evidence,
+            required_layers={Layer.EXECUTION.value},
+            allowed_layers={Layer.EXECUTION.value},
+        )
+        reasons.extend(execution_reasons)
+
+    reasons = sorted(set(reasons))
+    decision = ProofDecision.VERIFIED if not reasons else ProofDecision.REJECTED
+    return decision, reasons
+
+
+def _record_matches(
+    proof: dict[str, Any],
+    expected_decision: str,
+    reasons: list[str],
+) -> list[str]:
+    integrity: list[str] = []
+    if proof.get("decision") != expected_decision:
+        integrity.append("DECISION_MISMATCH")
+    recorded_reasons = proof.get("reason_codes")
+    if not isinstance(recorded_reasons, list):
+        integrity.append("INVALID_REASON_CODES")
+    elif recorded_reasons != sorted(set(reasons)):
+        integrity.append("REASON_CODES_MISMATCH")
+    return integrity
+
+
+def verify_proof(proof: dict[str, Any]) -> VerificationResult:
+    integrity: list[str] = []
     supplied_digest = proof.get("proof_digest")
     if not valid_digest(str(supplied_digest or "")):
-        reasons.append("INVALID_PROOF_DIGEST_FORMAT")
+        integrity.append("INVALID_PROOF_DIGEST_FORMAT")
     elif sha256_digest(proof_payload(proof)) != supplied_digest:
-        reasons.append("PROOF_DIGEST_MISMATCH")
+        integrity.append("PROOF_DIGEST_MISMATCH")
 
     if proof.get("schema") != "operationproof.operation-proof.v1":
-        reasons.append("UNSUPPORTED_SCHEMA")
+        integrity.append("UNSUPPORTED_SCHEMA")
 
     phase = proof.get("phase")
     operation_id = proof.get("operation_id")
     if not isinstance(operation_id, str) or not operation_id:
-        reasons.append("INVALID_OPERATION_ID")
+        integrity.append("INVALID_OPERATION_ID")
 
     evidence = proof.get("evidence")
     if not isinstance(evidence, list):
-        reasons.append("INVALID_EVIDENCE")
+        integrity.append("INVALID_EVIDENCE")
         evidence = []
 
+    semantic_reasons: list[str] = []
     if phase == "PRE" and isinstance(operation_id, str):
-        decision, evidence_reasons = evaluate_evidence_set(
-            operation_id=operation_id,
-            evidence=evidence,
-            required_layers={layer.value for layer in PRE_LAYERS},
-            forbidden_layers={Layer.EXECUTION.value},
-        )
-        reasons.extend(evidence_reasons)
+        decision, semantic_reasons = evaluate_pre_semantics(operation_id, evidence)
         expected_decision = decision.value
-    elif phase == "FINAL" and isinstance(operation_id, str):
-        pre_digest = proof.get("pre_proof_digest")
-        if not valid_digest(str(pre_digest or "")):
-            reasons.append("INVALID_PRE_PROOF_DIGEST")
-        decision, evidence_reasons = evaluate_evidence_set(
+    elif phase == "FINAL":
+        decision, semantic_reasons = evaluate_final_semantics(
             operation_id=operation_id,
+            pre_proof=proof.get("pre_proof"),
+            pre_digest=proof.get("pre_proof_digest"),
             evidence=evidence,
-            required_layers={Layer.EXECUTION.value},
         )
-        reasons.extend(evidence_reasons)
-        unexpected = {item.get("layer") for item in evidence} - {Layer.EXECUTION.value}
-        for layer in sorted(str(value) for value in unexpected):
-            reasons.append(f"UNEXPECTED_FINAL_LAYER:{layer}")
         expected_decision = decision.value
     else:
-        reasons.append("INVALID_PHASE")
+        integrity.append("INVALID_PHASE")
         expected_decision = ProofDecision.REJECTED.value
 
-    if proof.get("decision") != expected_decision:
-        reasons.append("DECISION_MISMATCH")
-
-    recorded_reasons = proof.get("reason_codes")
-    if not isinstance(recorded_reasons, list):
-        reasons.append("INVALID_REASON_CODES")
-
-    return VerificationResult(valid=not reasons, reason_codes=tuple(sorted(set(reasons))))
+    integrity.extend(_record_matches(proof, expected_decision, semantic_reasons))
+    return VerificationResult(
+        valid=not integrity,
+        reason_codes=tuple(sorted(set(integrity))),
+    )

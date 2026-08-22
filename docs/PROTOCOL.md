@@ -39,10 +39,11 @@ A PRE proof is `VERIFIED` only if every required layer is present exactly once, 
 
 A FINAL proof requires:
 
-1. a structurally and cryptographically valid PRE proof;
-2. PRE decision `VERIFIED`;
-3. execution evidence bound to the same operation;
-4. execution verdict `PASS`.
+1. an embedded, structurally and cryptographically valid PRE proof;
+2. `pre_proof_digest` matching that exact embedded PRE proof;
+3. PRE decision `VERIFIED`;
+4. execution evidence bound to the same operation;
+5. execution verdict `PASS`.
 
 ## Canonicalization
 
