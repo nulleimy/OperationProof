@@ -10,7 +10,7 @@ __all__ = [
     "ProofDecision",
     "Verdict",
     "VerificationResult",
-    "build_pre_proof",
     "build_final_proof",
+    "build_pre_proof",
     "verify_proof",
 ]

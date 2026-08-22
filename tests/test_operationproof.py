@@ -1,6 +1,6 @@
 from operationproof.builder import build_final_proof, build_pre_proof
 from operationproof.canonical import sha256_digest
-from operationproof.domain import EvidenceEnvelope, Layer, PRE_LAYERS, Verdict
+from operationproof.domain import PRE_LAYERS, EvidenceEnvelope, Layer, Verdict
 from operationproof.verifier import verify_proof
 
 

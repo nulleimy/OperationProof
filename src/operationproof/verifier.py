@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from .canonical import proof_payload, sha256_digest, valid_digest
-from .domain import Layer, PRE_LAYERS, ProofDecision
+from .domain import PRE_LAYERS, Layer, ProofDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,7 +19,7 @@ def _parse_time(value: str) -> datetime:
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:
         raise ValueError("timestamp must include timezone")
-    return parsed.astimezone(timezone.utc)
+    return parsed.astimezone(UTC)
 
 
 def evaluate_evidence_set(
@@ -34,7 +34,7 @@ def evaluate_evidence_set(
     reasons: list[str] = []
     seen: set[str] = set()
     forbidden_layers = forbidden_layers or set()
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     for item in evidence:
         layer = item.get("layer")
