@@ -22,10 +22,71 @@ def _parse_time(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _validate_evidence_envelope(
+    item: Any,
+    *,
+    index: int,
+    now: datetime,
+) -> tuple[str | None, list[str]]:
+    if not isinstance(item, dict):
+        return None, [f"INVALID_EVIDENCE_ENTRY:{index}"]
+
+    reasons: list[str] = []
+    layer = item.get("layer")
+    layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
+
+    if item.get("schema") != "operationproof.evidence-envelope.v1":
+        reasons.append(f"UNSUPPORTED_EVIDENCE_SCHEMA:{layer_name}")
+    if not isinstance(layer, str) or not layer:
+        reasons.append(f"INVALID_LAYER:{index}")
+        layer = None
+    if not isinstance(item.get("provider"), str) or not item.get("provider"):
+        reasons.append(f"INVALID_PROVIDER:{layer_name}")
+    if not isinstance(item.get("operation_id"), str) or not item.get("operation_id"):
+        reasons.append(f"INVALID_EVIDENCE_OPERATION_ID:{layer_name}")
+    if not isinstance(item.get("decision"), str) or not item.get("decision"):
+        reasons.append(f"INVALID_NATIVE_DECISION:{layer_name}")
+    if item.get("verdict") not in {"PASS", "FAIL", "UNKNOWN"}:
+        reasons.append(f"INVALID_VERDICT:{layer_name}")
+
+    for digest_field in ("subject_digest", "evidence_digest"):
+        if not valid_digest(str(item.get(digest_field, ""))):
+            reasons.append(f"INVALID_DIGEST:{layer_name}:{digest_field}")
+
+    issued_at = item.get("issued_at")
+    issued_time: datetime | None = None
+    if not isinstance(issued_at, str) or not issued_at:
+        reasons.append(f"INVALID_ISSUED_AT:{layer_name}")
+    else:
+        try:
+            issued_time = _parse_time(issued_at)
+        except (TypeError, ValueError):
+            reasons.append(f"INVALID_ISSUED_AT:{layer_name}")
+
+    expires_at = item.get("expires_at")
+    if expires_at is not None:
+        if not isinstance(expires_at, str) or not expires_at:
+            reasons.append(f"INVALID_EXPIRY:{layer_name}")
+        else:
+            try:
+                expiry_time = _parse_time(expires_at)
+                if expiry_time <= now:
+                    reasons.append(f"EXPIRED_EVIDENCE:{layer_name}")
+                if issued_time is not None and expiry_time <= issued_time:
+                    reasons.append(f"INVALID_EXPIRY_ORDER:{layer_name}")
+            except (TypeError, ValueError):
+                reasons.append(f"INVALID_EXPIRY:{layer_name}")
+
+    if not isinstance(item.get("metadata"), dict):
+        reasons.append(f"INVALID_METADATA:{layer_name}")
+
+    return layer, reasons
+
+
 def evaluate_evidence_set(
     *,
     operation_id: str,
-    evidence: list[dict[str, Any]],
+    evidence: list[Any],
     required_layers: set[str],
     forbidden_layers: set[str] | None = None,
     allowed_layers: set[str] | None = None,
@@ -36,8 +97,12 @@ def evaluate_evidence_set(
     forbidden_layers = forbidden_layers or set()
     now = now or datetime.now(UTC)
 
-    for item in evidence:
-        layer = item.get("layer")
+    for index, item in enumerate(evidence):
+        layer, envelope_reasons = _validate_evidence_envelope(item, index=index, now=now)
+        reasons.extend(envelope_reasons)
+        if not isinstance(item, dict) or layer is None:
+            continue
+
         if layer in seen:
             reasons.append(f"DUPLICATE_LAYER:{layer}")
         seen.add(layer)
@@ -53,24 +118,6 @@ def evaluate_evidence_set(
         elif item.get("verdict") != "PASS":
             reasons.append(f"LAYER_UNKNOWN:{layer}")
 
-        for digest_field in ("subject_digest", "evidence_digest"):
-            if not valid_digest(str(item.get(digest_field, ""))):
-                reasons.append(f"INVALID_DIGEST:{layer}:{digest_field}")
-
-        issued_at = item.get("issued_at")
-        try:
-            _parse_time(str(issued_at))
-        except (TypeError, ValueError):
-            reasons.append(f"INVALID_ISSUED_AT:{layer}")
-
-        expires_at = item.get("expires_at")
-        if expires_at:
-            try:
-                if _parse_time(expires_at) <= now:
-                    reasons.append(f"EXPIRED_EVIDENCE:{layer}")
-            except (TypeError, ValueError):
-                reasons.append(f"INVALID_EXPIRY:{layer}")
-
     for missing in sorted(required_layers - seen):
         reasons.append(f"MISSING_LAYER:{missing}")
 
@@ -80,7 +127,7 @@ def evaluate_evidence_set(
 
 def evaluate_pre_semantics(
     operation_id: str,
-    evidence: list[dict[str, Any]],
+    evidence: list[Any],
 ) -> tuple[ProofDecision, list[str]]:
     return evaluate_evidence_set(
         operation_id=operation_id,
@@ -96,7 +143,7 @@ def evaluate_final_semantics(
     operation_id: Any,
     pre_proof: Any,
     pre_digest: Any,
-    evidence: list[dict[str, Any]],
+    evidence: list[Any],
 ) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
 
