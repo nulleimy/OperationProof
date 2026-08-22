@@ -67,6 +67,25 @@ def test_final_rejects_execution_for_another_operation() -> None:
     assert verify_proof(final).valid is True
 
 
+def test_final_builder_rejects_expired_execution_evidence() -> None:
+    pre = build_pre_proof("op-1", [evidence(layer) for layer in PRE_LAYERS])
+    execution = EvidenceEnvelope(
+        layer=Layer.EXECUTION,
+        provider="test:execution",
+        operation_id="op-1",
+        decision="native-ok",
+        verdict=Verdict.PASS,
+        subject_digest=sha256_digest({"subject": "execution"}),
+        evidence_digest=sha256_digest({"evidence": "execution"}),
+        issued_at="1999-12-31T00:00:00+00:00",
+        expires_at="2000-01-01T00:00:00+00:00",
+    )
+    final = build_final_proof(pre, execution)
+    assert final["decision"] == "REJECTED"
+    assert "EXPIRED_EVIDENCE:execution" in final["reason_codes"]
+    assert verify_proof(final).valid is True
+
+
 def test_tampered_proof_digest_is_detected() -> None:
     proof = build_pre_proof("op-1", [evidence(layer) for layer in PRE_LAYERS])
     proof["operation_id"] = "tampered"
@@ -82,3 +101,23 @@ def test_tampered_embedded_pre_proof_is_detected() -> None:
     result = verify_proof(final)
     assert result.valid is False
     assert "PROOF_DIGEST_MISMATCH" in result.reason_codes
+
+
+def test_noncanonical_evidence_cannot_remain_verified() -> None:
+    proof = build_pre_proof("op-1", [evidence(layer) for layer in PRE_LAYERS])
+    proof["evidence"][0]["provider"] = ""
+    proof["proof_digest"] = sha256_digest({k: v for k, v in proof.items() if k != "proof_digest"})
+    result = verify_proof(proof)
+    assert result.valid is False
+    assert "DECISION_MISMATCH" in result.reason_codes
+    assert "REASON_CODES_MISMATCH" in result.reason_codes
+
+
+def test_non_object_evidence_fails_closed_without_exception() -> None:
+    proof = build_pre_proof("op-1", [evidence(layer) for layer in PRE_LAYERS])
+    proof["evidence"][0] = None
+    proof["proof_digest"] = sha256_digest({k: v for k, v in proof.items() if k != "proof_digest"})
+    result = verify_proof(proof)
+    assert result.valid is False
+    assert "DECISION_MISMATCH" in result.reason_codes
+    assert "REASON_CODES_MISMATCH" in result.reason_codes
