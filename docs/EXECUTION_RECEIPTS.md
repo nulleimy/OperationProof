@@ -43,20 +43,50 @@ Provider authenticity remains an R3 `ProviderTrustRegistry` concern.
 
 ## CASER trusted execution binding
 
-A native CASER receipt does not by itself contain an OperationProof PRE proof digest. R4 therefore
-requires `operationproof.caser-execution-binding.v1`, covering:
+A native CASER receipt does not by itself contain an OperationProof PRE proof digest. Native
+`contentIdentity` fields are also provider-owned references: OperationProof must not assume that a
+self-claimed native identity authenticates the exact JSON document supplied to the adapter.
+
+R4 therefore requires `operationproof.caser-execution-binding.v1`, covering:
 
 - `operation_id`;
-- `pre_proof_digest`;
+- exact `pre_proof_digest`;
 - native receipt content identity;
 - native verification content identity;
+- OperationProof canonical SHA-256 digest of the complete native receipt document;
+- OperationProof canonical SHA-256 digest of the complete native verification document;
 - execution instance id;
 - issued and expiry timestamps;
 - deterministic binding digest.
 
-An external `binding_verifier` must confirm this binding through a trust mechanism outside the
-OperationProof proof document. Missing, false, expired, tampered, or throwing verification fails
-closed.
+The two OperationProof-local document digests prevent a trusted binding from being replayed after
+claims, checks, scope, outcome, or other native document content changes while a native
+`contentIdentity` string is retained. They establish exact-content binding, not provider identity.
+
+An external `binding_verifier` must authenticate the binding through a trust mechanism outside the
+OperationProof proof document. The verifier must treat the bound payload—including both exact
+document digests—as authoritative input. Missing, false, expired, tampered, or throwing
+verification fails closed.
+
+## Independent outcome and post-state requirements
+
+Stronger execution claims require stronger native verification evidence:
+
+- `executionOutcomeIndependentlyVerified=true` requires `runnerIndependent=true`, an
+  outcome-capable verification scope, and a PASS `execution-outcome` check whose observation equals
+  the claimed outcome;
+- a PASS `read-only-effect` check must observe exactly `READ_ONLY`; contradictory effect evidence is
+  rejected;
+- `providerPostStateVerified=true` requires `runnerIndependent=true`, exact scope
+  `EXECUTION_OUTCOME_AND_PROVIDER_POST_STATE`, verification class
+  `INDEPENDENT_PROVIDER_OBSERVATION`, a PASS `provider-post-state` check, and observation
+  `VERIFIED`;
+- every verification check name is scanned before claims are consumed; duplicate check names are
+  rejected even if that check would otherwise be unused.
+
+The post-state scope/class above describes future stronger provider evidence used by conformance
+fixtures. It does not claim that the currently evidenced CASER V2 deployment provides V3/provider
+post-state verification.
 
 ## Verdict mapping
 
@@ -75,11 +105,13 @@ not a silent success.
 
 ## Trust boundary
 
-Three different properties remain separate:
+Four properties remain deliberately separate:
 
-1. `verify_proof()` verifies OperationProof structure, digests, semantics, and PRE/FINAL binding.
-2. the CASER adapter validates and normalizes native receipt/verification claims plus trusted PRE binding.
-3. `verify_proof_trust()` verifies provider authenticity using deployment-owned trust configuration.
+1. `verify_proof()` verifies OperationProof structure, digests, deterministic semantics, and PRE/FINAL binding.
+2. the CASER adapter validates native receipt/verification consistency and maps claims fail-closed.
+3. `binding_verifier` authenticates the exact PRE/receipt/verification binding out of band.
+4. `verify_proof_trust()` verifies provider authenticity using deployment-owned trust configuration and recursively requires trusted PRE evidence for FINAL proofs.
 
-A production sidecar should require all relevant gates. Native content identities, metadata strings,
-or self-asserted provider names never establish trust roots.
+A production consumer should require all relevant gates. Adapter normalization alone is not runtime
+authority. Native content identities, metadata strings, local canonical hashes, or self-asserted
+provider names never establish trust roots.
