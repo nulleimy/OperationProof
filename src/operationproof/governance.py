@@ -59,10 +59,15 @@ def _has_pull_request_bypass(value: object) -> bool:
 def verify_protection_document(
     protection: Mapping[str, Any],
     policy: Mapping[str, Any],
+    *,
+    repository_owner_type: str | None = None,
 ) -> tuple[str, ...]:
     """Verify GitHub's full branch-protection response against the canonical policy."""
 
     reasons: list[str] = []
+
+    if repository_owner_type not in {None, "User", "Organization"}:
+        raise GovernanceVerificationError("repository owner type is invalid")
 
     required = policy.get("required_status_checks")
     if not isinstance(required, Mapping):
@@ -126,7 +131,10 @@ def verify_protection_document(
     if "restrictions" not in policy or policy.get("restrictions") is not None:
         raise GovernanceVerificationError("policy.restrictions must be explicitly null")
     if "restrictions" not in protection:
-        reasons.append("PUSH_RESTRICTIONS_STATE_MISSING")
+        if repository_owner_type == "Organization":
+            reasons.append("PUSH_RESTRICTIONS_STATE_MISSING")
+        elif repository_owner_type != "User":
+            reasons.append("REPOSITORY_OWNER_TYPE_UNKNOWN")
     elif protection.get("restrictions") is not None:
         reasons.append("PUSH_RESTRICTIONS_PRESENT")
 
