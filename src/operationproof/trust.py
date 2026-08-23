@@ -1,16 +1,46 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from .domain import Layer
 from .verifier import verify_proof
 
+DIRECT_VERIFICATION_STAGE: Final = "DIRECT"
+EMBEDDED_PRE_OF_FINAL_STAGE: Final = "EMBEDDED_PRE_OF_FINAL"
+
+
+@dataclass(slots=True)
+class _VerificationStageInvocation:
+    stage: str
+    active: bool = True
+
+
+_VERIFICATION_INVOCATION: ContextVar[_VerificationStageInvocation | None] = ContextVar(
+    "operationproof_trust_verification_invocation",
+    default=None,
+)
+
+
+def _current_verification_stage() -> str:
+    """Return the trusted stage only for an active provider-verifier invocation."""
+
+    invocation = _VERIFICATION_INVOCATION.get()
+    if invocation is None or invocation.active is not True:
+        return DIRECT_VERIFICATION_STAGE
+    return invocation.stage
+
 
 @dataclass(frozen=True, slots=True)
 class TrustVerificationContext:
-    """Trusted context derived from one structurally verified proof scope."""
+    """Trusted context derived from one structurally verified proof scope.
+
+    This remains the original six-field R3 public contract. Stateful provider stage
+    information is deliberately kept out of this object and is available only to
+    internal provider-specific trust code while its verifier invocation is active.
+    """
 
     root_phase: str
     evidence_phase: str
@@ -75,6 +105,7 @@ def _verify_evidence_trust(
     *,
     context: TrustVerificationContext,
     registry: ProviderTrustRegistry,
+    verification_stage: str,
 ) -> list[str]:
     if not isinstance(item, Mapping):
         return [f"INVALID_TRUST_EVIDENCE_ENTRY:{context.evidence_index}"]
@@ -90,28 +121,29 @@ def _verify_evidence_trust(
     if verifier is None:
         return [f"UNREGISTERED_PROVIDER:{layer}:{provider}"]
 
+    invocation = _VerificationStageInvocation(stage=verification_stage)
+    token = _VERIFICATION_INVOCATION.set(invocation)
     try:
         trusted = verifier(item, context)
     except Exception:  # noqa: BLE001 - external verifier boundary must fail closed
         return [f"PROVIDER_TRUST_VERIFIER_ERROR:{layer}:{provider}"]
+    finally:
+        invocation.active = False
+        _VERIFICATION_INVOCATION.reset(token)
 
     if trusted is not True:
         return [f"UNTRUSTED_PROVIDER_EVIDENCE:{layer}:{provider}"]
     return []
 
 
-def verify_proof_trust(
+def _verify_proof_trust_at_stage(
     proof: dict[str, Any],
     registry: ProviderTrustRegistry,
+    *,
+    verification_stage: str,
 ) -> TrustVerificationResult:
-    """Verify provider authenticity after structural proof verification.
-
-    PRE evidence is always verified in the PRE proof's own trusted context. FINAL
-    verification first requires that exact embedded PRE proof to pass recursively,
-    then verifies only FINAL execution evidence with the outer FINAL context. This
-    prevents a FINAL wrapper from changing the trust context under which PRE evidence
-    is evaluated.
-    """
+    if verification_stage not in {DIRECT_VERIFICATION_STAGE, EMBEDDED_PRE_OF_FINAL_STAGE}:
+        return TrustVerificationResult(False, ("INVALID_TRUST_VERIFICATION_STAGE",))
 
     integrity = verify_proof(proof)
     if not integrity.valid:
@@ -138,7 +170,11 @@ def verify_proof_trust(
         pre_proof = proof.get("pre_proof")
         if not isinstance(pre_proof, dict):
             return TrustVerificationResult(False, ("INVALID_TRUST_PRE_PROOF",))
-        pre_result = verify_proof_trust(pre_proof, registry)
+        pre_result = _verify_proof_trust_at_stage(
+            pre_proof,
+            registry,
+            verification_stage=EMBEDDED_PRE_OF_FINAL_STAGE,
+        )
         reasons.extend(pre_result.reason_codes)
 
     evidence = proof.get("evidence")
@@ -155,10 +191,37 @@ def verify_proof_trust(
                 evidence_index=index,
             )
             reasons.extend(
-                _verify_evidence_trust(item, context=context, registry=registry)
+                _verify_evidence_trust(
+                    item,
+                    context=context,
+                    registry=registry,
+                    verification_stage=verification_stage,
+                )
             )
 
     return TrustVerificationResult(
         trusted=not reasons,
         reason_codes=tuple(sorted(set(reasons))),
+    )
+
+
+def verify_proof_trust(
+    proof: dict[str, Any],
+    registry: ProviderTrustRegistry,
+) -> TrustVerificationResult:
+    """Verify provider authenticity after structural proof verification.
+
+    PRE evidence is always verified in the PRE proof's own trusted context. FINAL
+    verification recursively verifies the exact embedded PRE proof with a trusted
+    callback-time post-execution stage while retaining that PRE proof's own phase,
+    digest, operation id, and absent ``pre_proof_digest``. The stage stays outside
+    the public context and its invocation marker is revoked on callback exit,
+    preventing proof-controlled or child-task stage laundering while preserving the
+    original ProviderTrustRegistry context contract.
+    """
+
+    return _verify_proof_trust_at_stage(
+        proof,
+        registry,
+        verification_stage=DIRECT_VERIFICATION_STAGE,
     )
