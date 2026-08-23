@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from operationproof.adapters.caser import _parse_timestamp as parse_caser_timestamp
 from operationproof.canonical import sha256_digest
 from operationproof.execution import execution_receipt_payload, verify_execution_receipt
-from operationproof.rfc3339 import compare_timestamps, parse_rfc3339
+from operationproof.rfc3339 import (
+    compare_timestamps,
+    parse_rfc3339,
+    timestamp_from_datetime,
+)
 
 
 def _receipt(*, issued_at: str, expires_at: str | None) -> dict[str, object]:
@@ -102,3 +108,67 @@ def test_offset_equivalent_instants_compare_equal() -> None:
     offset = parse_rfc3339("2026-08-23T01:00:00.2500+01:00")
 
     assert compare_timestamps(utc, offset) == 0
+
+
+def test_known_leap_second_remains_before_following_minute() -> None:
+    leap = parse_rfc3339("2016-12-31T23:59:60.9Z")
+    following = parse_rfc3339("2017-01-01T00:00:00.5Z")
+
+    assert compare_timestamps(leap, following) < 0
+
+
+def test_known_leap_second_with_offset_maps_to_same_instant() -> None:
+    utc = parse_rfc3339("2016-12-31T23:59:60.25Z")
+    offset = parse_rfc3339("2017-01-01T00:59:60.2500+01:00")
+
+    assert compare_timestamps(utc, offset) == 0
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-08-23T12:34:60Z",
+        "2016-12-31T12:34:60Z",
+        "2017-01-01T00:00:60Z",
+    ],
+)
+def test_second_60_outside_known_leap_position_fails_closed(value: str) -> None:
+    with pytest.raises(ValueError, match="known UTC leap second"):
+        parse_rfc3339(value)
+
+
+def test_unicode_digits_are_rejected() -> None:
+    with pytest.raises(ValueError, match="syntax"):
+        parse_rfc3339("٢٠٢٦-٠٨-٢٣T٠٠:٠٠:٠٠Z")
+
+
+def test_unicode_fraction_digits_are_rejected() -> None:
+    with pytest.raises(ValueError, match="syntax"):
+        parse_rfc3339("2026-08-23T00:00:00.١Z")
+
+
+def test_unknown_negative_zero_offset_is_not_treated_as_exact_utc() -> None:
+    with pytest.raises(ValueError, match="unknown local offset"):
+        parse_rfc3339("2026-08-23T00:00:00-00:00")
+
+
+def test_datetime_and_rfc3339_share_post_leap_time_scale() -> None:
+    text = parse_rfc3339("2026-08-23T00:00:00.123456Z")
+    native = timestamp_from_datetime(datetime(2026, 8, 23, 0, 0, 0, 123456, tzinfo=UTC))
+
+    assert compare_timestamps(text, native) == 0
+
+
+def test_execution_receipt_rejects_expiry_inside_leap_second_before_next_minute_issue() -> None:
+    receipt = _receipt(
+        issued_at="2017-01-01T00:00:00.5Z",
+        expires_at="2016-12-31T23:59:60.9Z",
+    )
+
+    result = verify_execution_receipt(
+        receipt,
+        now=datetime(2016, 12, 31, 23, 59, 59, tzinfo=UTC),
+    )
+
+    assert result.valid is False
+    assert "INVALID_EXECUTION_RECEIPT_EXPIRY_ORDER" in result.reason_codes
