@@ -104,11 +104,14 @@ def _validate_binding(
         raise SubjectBindingError("SUBJECT_BINDING_DIGEST_MISMATCH")
 
     try:
+        native_issued = parse_rfc3339(native_envelope.get("issued_at"))
         issued = parse_rfc3339(binding.get("issued_at"))
         expires = parse_rfc3339(binding.get("expires_at"))
         verification_now = timestamp_from_datetime(now)
     except (TypeError, ValueError) as exc:
         raise SubjectBindingError("INVALID_SUBJECT_BINDING_TIME") from exc
+    if compare_timestamps(issued, native_issued) < 0:
+        raise SubjectBindingError("SUBJECT_BINDING_PREDATES_NATIVE_EVIDENCE")
     if compare_timestamps(expires, issued) <= 0:
         raise SubjectBindingError("INVALID_SUBJECT_BINDING_TIME_WINDOW")
     if compare_timestamps(issued, verification_now) > 0:
@@ -163,14 +166,17 @@ def bind_evidence_to_subject(
     if trusted is not True:
         raise SubjectBindingError("UNTRUSTED_SUBJECT_BINDING")
 
-    metadata = _snapshot(envelope.metadata, "INVALID_NATIVE_EVIDENCE_METADATA")
+    native_metadata = native_envelope.get("metadata")
+    if not isinstance(native_metadata, Mapping):
+        raise SubjectBindingError("INVALID_NATIVE_EVIDENCE_METADATA")
+    metadata = _snapshot(native_metadata, "INVALID_NATIVE_EVIDENCE_METADATA")
     if _METADATA_KEY in metadata:
         raise SubjectBindingError("SUBJECT_BINDING_ALREADY_PRESENT")
     metadata[_METADATA_KEY] = {
         "protocol": _BINDING_SCHEMA,
         "binding_digest": binding_digest,
         "native_envelope_digest": sha256_digest(native_envelope),
-        "native_subject_digest": envelope.subject_digest,
+        "native_subject_digest": native_envelope["subject_digest"],
     }
     return replace(
         envelope,
