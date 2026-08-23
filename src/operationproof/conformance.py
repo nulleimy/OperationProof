@@ -113,6 +113,11 @@ def _validate_suite(cases: tuple[ProviderConformanceCase, ...]) -> None:
             raise ProviderConformanceError(
                 f"INVALID_CONFORMANCE_POSTCONDITION:{case.scenario.value}"
             )
+        if (
+            case.scenario is ConformanceScenario.MUTATION_ISOLATION
+            and case.postcondition is None
+        ):
+            raise ProviderConformanceError("MISSING_MUTATION_ISOLATION_POSTCONDITION")
     missing = _REQUIRED_SCENARIOS - seen
     extra = seen - _REQUIRED_SCENARIOS
     if missing:
@@ -209,7 +214,7 @@ def _run_determinism_case(
         try:
             first = canonical_json_bytes(outputs[0].to_dict())
             second = canonical_json_bytes(outputs[1].to_dict())
-        except (TypeError, ValueError, OverflowError, RecursionError):
+        except (AttributeError, TypeError, ValueError, OverflowError, RecursionError):
             reasons.append("DETERMINISM_OUTPUT_NOT_CANONICAL_JSON")
         else:
             if first != second:
