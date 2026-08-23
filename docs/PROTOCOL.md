@@ -43,6 +43,31 @@ The four component digests are provider-neutral opaque identities. Provider adap
 
 This prevents evidence composition across different actors, intentions, targets, or pre-operation states even when all provider-local verdicts individually say `PASS`.
 
+## Provider subject correlation
+
+Existing providers may already emit a provider-native `subject_digest` whose vocabulary is narrower or different from the canonical OperationSubject. R6 does **not** permit callers to relabel such evidence by assignment.
+
+`operationproof.subject-binding.v1` is the provider-neutral correlation artifact. It binds:
+
+```text
+operation_id
+layer
+provider
+native_envelope_digest
+native_subject_digest
+canonical_subject_digest
+issued_at
+expires_at
+```
+
+plus its own `binding_digest`.
+
+`bind_evidence_to_subject(...)` accepts the mapping only after an external trusted verifier authenticates the exact binding. The resulting envelope retains the native subject/envelope identities in binding metadata while carrying the canonical subject digest for v2 composition.
+
+At provider-trust time, `make_subject_bound_trust_verifier(...)` reconstructs the exact original native envelope, runs the original provider verifier, independently resolves the subject binding out-of-band, and re-authenticates it. Therefore a proof cannot grant itself subject-correlation authority merely by embedding a matching hash.
+
+This bridge is provider-neutral and can wrap V-One authorization, HOWEDO continuity, CASER execution, or another provider without weakening that provider's existing trust verifier. A deployment must still supply the authoritative subject-binding resolver/verifier.
+
 ## PRE phase
 
 Required layers:
