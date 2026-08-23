@@ -90,7 +90,7 @@ async def _read_bounded_body(request: Request, max_body_bytes: int) -> bytes:
             body.extend(chunk)
     except SidecarRequestError:
         raise
-    except Exception as exc:  # noqa: BLE001 - network boundary must fail closed
+    except Exception as exc:
         raise SidecarRequestError(400, "REQUEST_BODY_READ_FAILED") from exc
 
     if declared is not None and len(body) != declared:
