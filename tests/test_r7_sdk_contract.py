@@ -199,3 +199,31 @@ def test_canonical_proof_json_is_deterministic_and_round_trips() -> None:
 
     assert canonical == operationproof.canonical_proof_json(parsed)
     assert parsed == original
+
+
+def test_nested_final_pre_proof_is_rejected_before_recursive_verification() -> None:
+    raw = json.dumps(
+        {
+            "phase": "FINAL",
+            "pre_proof": {
+                "phase": "FINAL",
+                "pre_proof": {"phase": "PRE"},
+            },
+        }
+    )
+
+    assessment = operationproof.assess_proof_json(raw)
+
+    assert assessment.integrity_valid is False
+    assert assessment.accepted is False
+    assert assessment.sdk_reason_codes == ("NESTED_FINAL_PRE_PROOF_FORBIDDEN",)
+
+
+def test_excessive_document_depth_fails_closed_before_snapshot_or_verifier() -> None:
+    raw = '{"value":' * 80 + "null" + "}" * 80
+
+    assessment = operationproof.assess_proof_json(raw)
+
+    assert assessment.integrity_valid is False
+    assert assessment.accepted is False
+    assert assessment.sdk_reason_codes == ("PROOF_DOCUMENT_DEPTH_EXCEEDED",)
