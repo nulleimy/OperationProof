@@ -31,6 +31,7 @@ def _protection() -> dict[str, object]:
                 "apps": [],
             },
         },
+        "restrictions": None,
         "required_conversation_resolution": {"enabled": True},
         "allow_force_pushes": {"enabled": False},
         "allow_deletions": {"enabled": False},
@@ -87,6 +88,28 @@ def test_pull_request_bypass_actor_fails_closed() -> None:
     assert reasons == ("PULL_REQUEST_BYPASS_ALLOWANCE_PRESENT",)
 
 
+def test_push_restrictions_fail_closed() -> None:
+    protection = _protection()
+    protection["restrictions"] = {
+        "users": [{"login": "restricted-user"}],
+        "teams": [],
+        "apps": [],
+    }
+
+    reasons = verify_protection_document(protection, _policy())
+
+    assert reasons == ("PUSH_RESTRICTIONS_PRESENT",)
+
+
+def test_missing_push_restriction_state_fails_closed() -> None:
+    protection = _protection()
+    del protection["restrictions"]
+
+    reasons = verify_protection_document(protection, _policy())
+
+    assert reasons == ("PUSH_RESTRICTIONS_STATE_MISSING",)
+
+
 def test_check_objects_are_accepted_as_required_contexts() -> None:
     protection = _protection()
     protection["required_status_checks"] = {
@@ -125,6 +148,8 @@ def test_governance_required_checks_match_explicit_ci_job_name() -> None:
     checks = policy["required_status_checks"]
     assert isinstance(checks, dict)
     assert checks["contexts"] == ["test (3.12)", "test (3.13)"]
+    assert "restrictions" in policy
+    assert policy["restrictions"] is None
 
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "jobs:\n  test:" in workflow
