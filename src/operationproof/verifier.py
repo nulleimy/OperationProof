@@ -6,6 +6,7 @@ from typing import Any
 
 from .canonical import proof_payload, sha256_digest, valid_digest
 from .domain import PRE_LAYERS, Layer, ProofDecision
+from .rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,12 +15,8 @@ class VerificationResult:
     reason_codes: tuple[str, ...]
 
 
-def _parse_time(value: str) -> datetime:
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        raise ValueError("timestamp must include timezone")
-    return parsed.astimezone(UTC)
+def _parse_time(value: str) -> ParsedTimestamp:
+    return parse_rfc3339(value)
 
 
 def _validate_evidence_envelope(
@@ -54,7 +51,7 @@ def _validate_evidence_envelope(
             reasons.append(f"INVALID_DIGEST:{layer_name}:{digest_field}")
 
     issued_at = item.get("issued_at")
-    issued_time: datetime | None = None
+    issued_time: ParsedTimestamp | None = None
     if not isinstance(issued_at, str) or not issued_at:
         reasons.append(f"INVALID_ISSUED_AT:{layer_name}")
     else:
@@ -70,9 +67,10 @@ def _validate_evidence_envelope(
         else:
             try:
                 expiry_time = _parse_time(expires_at)
-                if expiry_time <= now:
+                now_time = timestamp_from_datetime(now)
+                if compare_timestamps(expiry_time, now_time) <= 0:
                     reasons.append(f"EXPIRED_EVIDENCE:{layer_name}")
-                if issued_time is not None and expiry_time <= issued_time:
+                if issued_time is not None and compare_timestamps(expiry_time, issued_time) <= 0:
                     reasons.append(f"INVALID_EXPIRY_ORDER:{layer_name}")
             except (TypeError, ValueError):
                 reasons.append(f"INVALID_EXPIRY:{layer_name}")
