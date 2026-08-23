@@ -4,7 +4,10 @@ from typing import Any
 
 import pytest
 
-from operationproof.adapters.execution import ExecutionReceiptError, SandCloudExecutionReceiptAdapter
+from operationproof.adapters.execution import (
+    ExecutionReceiptError,
+    SandCloudExecutionReceiptAdapter,
+)
 from operationproof.canonical import sha256_digest
 
 
