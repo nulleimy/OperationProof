@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict, fields
 
 from operationproof.builder import build_final_proof, build_pre_proof
@@ -85,3 +86,44 @@ def test_stage_is_callback_scoped_without_changing_legacy_context_fields() -> No
         context.verification_stage == DIRECT_VERIFICATION_STAGE
         for context in observed_contexts
     )
+
+
+def test_embedded_stage_is_revoked_in_inherited_asyncio_context() -> None:
+    async def scenario() -> None:
+        pre_items = [_evidence(layer) for layer in PRE_LAYERS]
+        execution = _evidence(Layer.EXECUTION)
+        pre = build_pre_proof("op-stage", pre_items)
+        final = build_final_proof(pre, execution)
+        child_tasks: list[asyncio.Task[None]] = []
+        child_observed_stages: list[str] = []
+
+        def verifier(_item: object, context: TrustVerificationContext) -> bool:
+            if (
+                context.root_phase == "PRE"
+                and context.verification_stage == EMBEDDED_PRE_OF_FINAL_STAGE
+                and not child_tasks
+            ):
+
+                async def observe_after_callback() -> None:
+                    await asyncio.sleep(0)
+                    child_observed_stages.append(context.verification_stage)
+
+                child_tasks.append(asyncio.create_task(observe_after_callback()))
+            return True
+
+        registry = ProviderTrustRegistry()
+        for item in pre_items + [execution]:
+            registry.register(layer=item.layer, provider=item.provider, verifier=verifier)
+
+        result = verify_proof_trust(final, registry)
+        assert result.trusted is True
+        assert len(child_tasks) == 1
+
+        await asyncio.gather(*child_tasks)
+
+        # create_task copied the ContextVar binding, but the copied marker itself was
+        # revoked when the provider callback returned. The child therefore cannot
+        # retain post-execution authority and falls back to DIRECT admission semantics.
+        assert child_observed_stages == [DIRECT_VERIFICATION_STAGE]
+
+    asyncio.run(scenario())
