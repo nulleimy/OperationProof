@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from operationproof.builder import build_pre_proof
+from operationproof.builder import build_final_proof, build_pre_proof
 from operationproof.canonical import proof_payload, sha256_digest
-from operationproof.domain import PRE_LAYERS, EvidenceEnvelope, Verdict
-from operationproof.verifier import evaluate_pre_semantics, verify_proof
+from operationproof.domain import PRE_LAYERS, EvidenceEnvelope, Layer, Verdict
+from operationproof.verifier import evaluate_final_semantics, evaluate_pre_semantics, verify_proof
 
 
 def _pre_proof() -> dict[str, object]:
@@ -25,6 +25,20 @@ def _pre_proof() -> dict[str, object]:
         for layer in PRE_LAYERS
     ]
     return build_pre_proof(operation_id, evidence)
+
+
+def _execution() -> EvidenceEnvelope:
+    return EvidenceEnvelope(
+        layer=Layer.EXECUTION,
+        provider="provider-execution",
+        operation_id="op-r3-2-schema-parity",
+        decision="EXECUTION_VERIFIED",
+        verdict=Verdict.PASS,
+        subject_digest=sha256_digest({"subject": "execution"}),
+        evidence_digest=sha256_digest({"evidence": "execution"}),
+        issued_at="2026-08-23T00:00:01Z",
+        metadata={"source": "r3.2-regression"},
+    )
 
 
 def _recompute_proof_digest(proof: dict[str, object]) -> None:
@@ -127,3 +141,50 @@ def test_nested_pre_proof_unknown_field_is_rejected_recursively() -> None:
 
     assert pre_result.valid is False
     assert "UNEXPECTED_PROOF_FIELDS:hidden_field" in pre_result.reason_codes
+
+
+def test_final_cannot_launder_self_consistent_nested_pre_integrity_failure() -> None:
+    pre = _pre_proof()
+    final = build_final_proof(pre, _execution())
+
+    nested_pre = deepcopy(pre)
+    nested_evidence = deepcopy(nested_pre["evidence"])
+    assert isinstance(nested_evidence, list)
+    first = nested_evidence[0]
+    assert isinstance(first, dict)
+    first["unsigned_extension"] = "nested-smuggle"
+    nested_pre["evidence"] = nested_evidence
+
+    nested_decision, nested_reasons = evaluate_pre_semantics(
+        str(nested_pre["operation_id"]),
+        nested_evidence,
+    )
+    nested_pre["decision"] = nested_decision.value
+    nested_pre["reason_codes"] = nested_reasons
+    _recompute_proof_digest(nested_pre)
+
+    final["pre_proof"] = nested_pre
+    final["pre_proof_digest"] = nested_pre["proof_digest"]
+    final_decision, final_reasons = evaluate_final_semantics(
+        operation_id=final["operation_id"],
+        pre_proof=nested_pre,
+        pre_digest=nested_pre["proof_digest"],
+        evidence=final["evidence"],
+    )
+    final["decision"] = final_decision.value
+    final["reason_codes"] = final_reasons
+    _recompute_proof_digest(final)
+
+    result = verify_proof(final)
+
+    assert nested_decision.value == "REJECTED"
+    assert final_decision.value == "REJECTED"
+    assert result.valid is False
+    assert "PRE_PROOF_INTEGRITY_INVALID" in result.reason_codes
+    assert any(
+        reason.startswith("PRE_PROOF_INTEGRITY:UNEXPECTED_EVIDENCE_FIELDS:")
+        for reason in result.reason_codes
+    )
+    assert "DECISION_MISMATCH" not in result.reason_codes
+    assert "REASON_CODES_MISMATCH" not in result.reason_codes
+    assert "PROOF_DIGEST_MISMATCH" not in result.reason_codes
