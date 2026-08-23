@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from decimal import Decimal
+from fractions import Fraction
 from typing import Any
 
 from ..canonical import sha256_digest, valid_digest
@@ -65,8 +65,8 @@ ReceiptVerifier = Callable[[Mapping[str, Any]], bool]
 ReceiptResolver = Callable[[str], Mapping[str, Any] | None]
 
 
-def _parse_timestamp(value: Any, code: str) -> Decimal:
-    """Parse RFC 3339 into exact UTC seconds without truncating fractional precision."""
+def _parse_timestamp(value: Any, code: str) -> Fraction:
+    """Parse RFC 3339 into exact UTC seconds without fractional rounding."""
 
     if not isinstance(value, str) or not value:
         raise ExecutionReceiptError(code)
@@ -101,15 +101,16 @@ def _parse_timestamp(value: Any, code: str) -> Decimal:
         raise ExecutionReceiptError(code) from exc
 
     delta = base - _EPOCH
-    exact_seconds = Decimal(delta.days * 86400 + delta.seconds)
+    exact_seconds = Fraction(delta.days * 86400 + delta.seconds, 1)
     if second == 60:
-        exact_seconds += Decimal(1)
+        exact_seconds += 1
 
     fraction = match.group("fraction")
     if fraction is not None:
-        exact_seconds += Decimal(f"0{fraction}")
+        digits = fraction[1:]
+        exact_seconds += Fraction(int(digits), 10 ** len(digits))
 
-    return exact_seconds - Decimal(offset_seconds)
+    return exact_seconds - offset_seconds
 
 
 def _receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
