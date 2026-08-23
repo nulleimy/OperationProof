@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict, fields
+
 from operationproof.builder import build_final_proof, build_pre_proof
 from operationproof.canonical import sha256_digest
 from operationproof.domain import PRE_LAYERS, EvidenceEnvelope, Layer, Verdict
@@ -7,7 +9,17 @@ from operationproof.trust import (
     DIRECT_VERIFICATION_STAGE,
     EMBEDDED_PRE_OF_FINAL_STAGE,
     ProviderTrustRegistry,
+    TrustVerificationContext,
     verify_proof_trust,
+)
+
+_CONTEXT_FIELDS = (
+    "root_phase",
+    "evidence_phase",
+    "operation_id",
+    "proof_digest",
+    "pre_proof_digest",
+    "evidence_index",
 )
 
 
@@ -25,15 +37,18 @@ def _evidence(layer: Layer) -> EvidenceEnvelope:
     )
 
 
-def test_embedded_pre_keeps_pre_context_but_gets_internal_post_execution_stage() -> None:
+def test_stage_is_callback_scoped_without_changing_legacy_context_fields() -> None:
     pre_items = [_evidence(layer) for layer in PRE_LAYERS]
     execution = _evidence(Layer.EXECUTION)
     pre = build_pre_proof("op-stage", pre_items)
     final = build_final_proof(pre, execution)
-    observed: list[object] = []
 
-    def verifier(_item: object, context: object) -> bool:
-        observed.append(context)
+    observed_contexts: list[TrustVerificationContext] = []
+    observed_stages: list[tuple[str, str]] = []
+
+    def verifier(_item: object, context: TrustVerificationContext) -> bool:
+        observed_contexts.append(context)
+        observed_stages.append((context.root_phase, context.verification_stage))
         return True
 
     registry = ProviderTrustRegistry()
@@ -41,22 +56,32 @@ def test_embedded_pre_keeps_pre_context_but_gets_internal_post_execution_stage()
         registry.register(layer=item.layer, provider=item.provider, verifier=verifier)
 
     assert verify_proof_trust(pre, registry).trusted is True
-    direct = list(observed)
-    observed.clear()
-    assert all(getattr(ctx, "verification_stage", None) == DIRECT_VERIFICATION_STAGE for ctx in direct)
+    assert observed_stages == [("PRE", DIRECT_VERIFICATION_STAGE)] * len(PRE_LAYERS)
+
+    for context in observed_contexts:
+        assert tuple(field.name for field in fields(context)) == _CONTEXT_FIELDS
+        assert tuple(asdict(context)) == _CONTEXT_FIELDS
+        assert "verification_stage" not in asdict(context)
+        assert context.verification_stage == DIRECT_VERIFICATION_STAGE
+
+    observed_contexts.clear()
+    observed_stages.clear()
 
     assert verify_proof_trust(final, registry).trusted is True
-    embedded = [ctx for ctx in observed if getattr(ctx, "root_phase", None) == "PRE"]
-    outer = [ctx for ctx in observed if getattr(ctx, "root_phase", None) == "FINAL"]
 
-    assert len(embedded) == len(PRE_LAYERS)
-    assert all(getattr(ctx, "evidence_phase", None) == "PRE" for ctx in embedded)
-    assert all(getattr(ctx, "proof_digest", None) == pre["proof_digest"] for ctx in embedded)
-    assert all(getattr(ctx, "pre_proof_digest", None) is None for ctx in embedded)
+    embedded = [stage for phase, stage in observed_stages if phase == "PRE"]
+    outer = [stage for phase, stage in observed_stages if phase == "FINAL"]
+    assert embedded == [EMBEDDED_PRE_OF_FINAL_STAGE] * len(PRE_LAYERS)
+    assert outer == [DIRECT_VERIFICATION_STAGE]
+
+    embedded_contexts = [context for context in observed_contexts if context.root_phase == "PRE"]
+    assert len(embedded_contexts) == len(PRE_LAYERS)
+    assert all(context.evidence_phase == "PRE" for context in embedded_contexts)
+    assert all(context.proof_digest == pre["proof_digest"] for context in embedded_contexts)
+    assert all(context.pre_proof_digest is None for context in embedded_contexts)
+
+    # The callback-only stage is reset after each provider verifier invocation.
     assert all(
-        getattr(ctx, "verification_stage", None) == EMBEDDED_PRE_OF_FINAL_STAGE
-        for ctx in embedded
+        context.verification_stage == DIRECT_VERIFICATION_STAGE
+        for context in observed_contexts
     )
-    assert len(outer) == 1
-    assert getattr(outer[0], "verification_stage", None) == DIRECT_VERIFICATION_STAGE
-    assert getattr(outer[0], "proof_digest", None) == final["proof_digest"]
