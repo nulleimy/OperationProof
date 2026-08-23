@@ -32,7 +32,7 @@ def registry_for(
             verifier = override
         else:
             expected_digest = item.evidence_digest
-            verifier = lambda envelope, expected=expected_digest: (
+            verifier = lambda envelope, context, expected=expected_digest: (
                 envelope.get("evidence_digest") == expected
             )
         registry.register(layer=item.layer, provider=item.provider, verifier=verifier)
@@ -59,7 +59,7 @@ def test_unregistered_provider_fails_closed() -> None:
 def test_provider_verifier_false_fails_closed() -> None:
     items = [evidence(layer) for layer in PRE_LAYERS]
     key = (Layer.INTENT.value, "test:intent")
-    registry = registry_for(items, overrides={key: lambda envelope: False})
+    registry = registry_for(items, overrides={key: lambda envelope, context: False})
     proof = build_pre_proof("op-1", items)
     result = verify_proof_trust(proof, registry)
     assert result.trusted is False
@@ -69,7 +69,7 @@ def test_provider_verifier_false_fails_closed() -> None:
 def test_provider_verifier_exception_fails_closed() -> None:
     items = [evidence(layer) for layer in PRE_LAYERS]
 
-    def broken_verifier(envelope: object) -> bool:
+    def broken_verifier(envelope: object, context: object) -> bool:
         raise RuntimeError("provider unavailable")
 
     key = (Layer.CONTINUITY.value, "test:continuity")
@@ -85,10 +85,18 @@ def test_provider_verifier_exception_fails_closed() -> None:
 
 def test_duplicate_registry_entry_cannot_silently_replace_verifier() -> None:
     registry = ProviderTrustRegistry()
-    registry.register(layer=Layer.IDENTITY, provider="issuer-a", verifier=lambda envelope: True)
+    registry.register(
+        layer=Layer.IDENTITY,
+        provider="issuer-a",
+        verifier=lambda envelope, context: True,
+    )
 
     try:
-        registry.register(layer=Layer.IDENTITY, provider="issuer-a", verifier=lambda envelope: True)
+        registry.register(
+            layer=Layer.IDENTITY,
+            provider="issuer-a",
+            verifier=lambda envelope, context: True,
+        )
     except ValueError as exc:
         assert str(exc) == "DUPLICATE_PROVIDER_TRUST_ENTRY"
     else:
@@ -133,6 +141,30 @@ def test_final_proof_recursively_requires_pre_and_execution_provider_trust() -> 
     result = verify_proof_trust(final, incomplete_registry)
     assert result.trusted is False
     assert "UNREGISTERED_PROVIDER:execution:test:execution" in result.reason_codes
+
+
+def test_execution_verifier_receives_exact_final_pre_proof_context() -> None:
+    pre_items = [evidence(layer) for layer in PRE_LAYERS]
+    execution = evidence(Layer.EXECUTION)
+    pre = build_pre_proof("op-1", pre_items)
+    final = build_final_proof(pre, execution)
+
+    key = (Layer.EXECUTION.value, "test:execution")
+
+    def execution_verifier(envelope: object, context: object) -> bool:
+        return (
+            getattr(context, "root_phase", None) == "FINAL"
+            and getattr(context, "evidence_phase", None) == "FINAL"
+            and getattr(context, "operation_id", None) == "op-1"
+            and getattr(context, "pre_proof_digest", None) == pre["proof_digest"]
+            and getattr(context, "proof_digest", None) == final["proof_digest"]
+        )
+
+    registry = registry_for(
+        pre_items + [execution],
+        overrides={key: execution_verifier},
+    )
+    assert verify_proof_trust(final, registry).trusted is True
 
 
 def test_integrity_failure_precedes_provider_trust() -> None:

@@ -39,6 +39,28 @@ perform another provider-specific authenticity check.
 The registry **must not** be populated from provider names, keys, URLs, booleans, or trust metadata
 carried inside the proof being verified. Doing so would let untrusted input define its own trust root.
 
+## Trusted proof context
+
+Provider verifiers receive two inputs:
+
+```text
+(envelope, TrustVerificationContext)
+```
+
+The context is derived only after the outer proof passes structural verification and contains:
+
+- `root_phase`
+- `evidence_phase`
+- exact outer `operation_id`
+- exact outer `proof_digest`
+- exact `pre_proof_digest` for FINAL proofs
+- stable `evidence_index`
+
+This is required for execution providers. A SandCloud/CASER verifier must be able to prove that a
+receipt belongs not merely to an operation ID, but to the exact PRE proof that authorized execution.
+It should compare the provider-authenticated receipt binding against `context.pre_proof_digest`, not
+against a pre-proof digest asserted only inside untrusted evidence metadata.
+
 ## Fail-closed invariants
 
 - no registered `(layer, provider)` verifier -> reject
@@ -48,6 +70,7 @@ carried inside the proof being verified. Doing so would let untrusted input defi
 - proof decision `REJECTED` -> provider trust never promotes it to `VERIFIED`
 - FINAL proof recursively requires trusted PRE evidence and trusted execution evidence
 - duplicate registry entries cannot silently replace an existing verifier
+- proof context comes from the structurally verified outer proof, never from provider-controlled metadata
 
 ## HOWEDO R2 interaction
 

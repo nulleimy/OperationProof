@@ -7,7 +7,20 @@ from typing import Any
 from .domain import Layer
 from .verifier import verify_proof
 
-EvidenceTrustVerifier = Callable[[Mapping[str, Any]], bool]
+
+@dataclass(frozen=True, slots=True)
+class TrustVerificationContext:
+    """Trusted context derived from the structurally verified outer proof."""
+
+    root_phase: str
+    evidence_phase: str
+    operation_id: str
+    proof_digest: str
+    pre_proof_digest: str | None
+    evidence_index: int
+
+
+EvidenceTrustVerifier = Callable[[Mapping[str, Any], TrustVerificationContext], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,16 +73,16 @@ class ProviderTrustRegistry:
 def _verify_evidence_trust(
     item: Any,
     *,
-    index: int,
+    context: TrustVerificationContext,
     registry: ProviderTrustRegistry,
 ) -> list[str]:
     if not isinstance(item, Mapping):
-        return [f"INVALID_TRUST_EVIDENCE_ENTRY:{index}"]
+        return [f"INVALID_TRUST_EVIDENCE_ENTRY:{context.evidence_index}"]
 
     layer = item.get("layer")
     provider = item.get("provider")
     if not isinstance(layer, str) or not layer:
-        return [f"INVALID_TRUST_LAYER:{index}"]
+        return [f"INVALID_TRUST_LAYER:{context.evidence_index}"]
     if not isinstance(provider, str) or not provider:
         return [f"INVALID_TRUST_PROVIDER:{layer}"]
 
@@ -78,7 +91,7 @@ def _verify_evidence_trust(
         return [f"UNREGISTERED_PROVIDER:{layer}:{provider}"]
 
     try:
-        trusted = verifier(item)
+        trusted = verifier(item, context)
     except Exception:
         return [f"PROVIDER_TRUST_VERIFIER_ERROR:{layer}:{provider}"]
 
@@ -87,19 +100,20 @@ def _verify_evidence_trust(
     return []
 
 
-def _collect_proof_evidence(proof: Mapping[str, Any]) -> list[Any]:
-    phase = proof.get("phase")
-    evidence: list[Any] = []
-
-    if phase == "FINAL":
+def _collect_evidence_with_phase(proof: Mapping[str, Any]) -> list[tuple[Any, str]]:
+    collected: list[tuple[Any, str]] = []
+    if proof.get("phase") == "FINAL":
         pre_proof = proof.get("pre_proof")
         if isinstance(pre_proof, Mapping):
-            evidence.extend(_collect_proof_evidence(pre_proof))
+            pre_evidence = pre_proof.get("evidence")
+            if isinstance(pre_evidence, list):
+                collected.extend((item, "PRE") for item in pre_evidence)
 
-    current = proof.get("evidence")
-    if isinstance(current, list):
-        evidence.extend(current)
-    return evidence
+    evidence = proof.get("evidence")
+    if isinstance(evidence, list):
+        evidence_phase = str(proof.get("phase"))
+        collected.extend((item, evidence_phase) for item in evidence)
+    return collected
 
 
 def verify_proof_trust(
@@ -108,10 +122,10 @@ def verify_proof_trust(
 ) -> TrustVerificationResult:
     """Verify provider authenticity/trust after structural proof verification.
 
-    This function is intentionally separate from ``verify_proof``. The structural
-    verifier proves canonical integrity and deterministic semantics; this trust gate
-    proves that every evidence provider is recognized by trusted deployment config
-    and that its external verifier accepts the exact serialized evidence envelope.
+    The provider callback receives only an evidence envelope plus immutable context
+    derived from the already structurally verified outer proof. In particular, an
+    execution provider can bind its receipt to ``context.pre_proof_digest`` instead
+    of trusting a pre-proof identifier supplied by the evidence itself.
     """
 
     integrity = verify_proof(proof)
@@ -123,9 +137,25 @@ def verify_proof_trust(
     if proof.get("decision") != "VERIFIED":
         return TrustVerificationResult(False, ("PROOF_NOT_VERIFIED",))
 
+    root_phase = str(proof.get("phase"))
+    operation_id = str(proof.get("operation_id"))
+    proof_digest = str(proof.get("proof_digest"))
+    pre_proof_digest_raw = proof.get("pre_proof_digest")
+    pre_proof_digest = (
+        str(pre_proof_digest_raw) if isinstance(pre_proof_digest_raw, str) else None
+    )
+
     reasons: list[str] = []
-    for index, item in enumerate(_collect_proof_evidence(proof)):
-        reasons.extend(_verify_evidence_trust(item, index=index, registry=registry))
+    for index, (item, evidence_phase) in enumerate(_collect_evidence_with_phase(proof)):
+        context = TrustVerificationContext(
+            root_phase=root_phase,
+            evidence_phase=evidence_phase,
+            operation_id=operation_id,
+            proof_digest=proof_digest,
+            pre_proof_digest=pre_proof_digest,
+            evidence_index=index,
+        )
+        reasons.extend(_verify_evidence_trust(item, context=context, registry=registry))
 
     return TrustVerificationResult(
         trusted=not reasons,
