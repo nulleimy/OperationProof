@@ -158,7 +158,8 @@ def test_subject_binding_cannot_predate_native_evidence() -> None:
 def test_binding_callback_cannot_mutate_caller_owned_native_metadata() -> None:
     subject = canonical_subject()
     native = native_evidence(Layer.CONTINUITY)
-    original_native = native.to_dict()
+    original_native_digest = sha256_digest(native.to_dict())
+    original_marker = native.metadata["native_marker"]
     binding = subject_binding(native, subject)
 
     def mutating_verifier(candidate: object) -> bool:
@@ -174,9 +175,9 @@ def test_binding_callback_cannot_mutate_caller_owned_native_metadata() -> None:
     )
 
     assert native.metadata["native_marker"] == "mutated-by-callback"
-    assert bound.metadata["native_marker"] == original_native["metadata"]["native_marker"]
+    assert bound.metadata["native_marker"] == original_marker
     marker = bound.metadata["operationproof_subject_binding"]
-    assert marker["native_envelope_digest"] == sha256_digest(original_native)
+    assert marker["native_envelope_digest"] == original_native_digest
 
 
 def test_subject_bound_trust_wrapper_reconstructs_exact_native_envelope() -> None:
