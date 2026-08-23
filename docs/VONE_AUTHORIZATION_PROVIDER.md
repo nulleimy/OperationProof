@@ -22,6 +22,7 @@ A consumption witness never substitutes for unused-grant admission. A consumed g
 The adapter requires:
 
 - exact V-One `execution-grant/v2` field set
+- exact integer `schema_version == 2`
 - `execution_id == OperationProof operation_id`
 - `required_permission == execution.run`
 - `use_semantics == ONE_TIME`
@@ -51,10 +52,12 @@ The subject digest binds the operation to the snapshot, actor, workspace, enviro
 
 ## Trusted verification stage
 
-`TrustVerificationContext.verification_stage` is generated internally by OperationProof and is never serialized in a proof.
+The R5.1 stage is internal OperationProof provider-trust state. It is **not** a field or property of the public six-field `TrustVerificationContext` and is never serialized in a proof.
 
 - `DIRECT` is used when a PRE proof is verified directly.
 - `EMBEDDED_PRE_OF_FINAL` is used when the exact embedded PRE of a structurally valid FINAL proof is recursively provider-verified.
+
+OperationProof carries this stage only during the active provider callback through a private `ContextVar` invocation marker. The marker is revoked in-place before the callback scope closes, so an `asyncio` child task that copied the context cannot retain embedded-FINAL authority after the parent callback returns.
 
 The stage marker does **not** replace or alter R3/R3.1 context isolation. Embedded PRE evidence still receives `root_phase=PRE`, `evidence_phase=PRE`, the PRE proof's own digest and operation id, and `pre_proof_digest=None`. An outer FINAL proof therefore cannot launder its digest or phase into PRE provider trust.
 
@@ -68,7 +71,7 @@ The stage marker does **not** replace or alter R3/R3.1 context isolation. Embedd
 
 When the same PRE proof is revalidated inside a FINAL proof, the grant may legitimately already be consumed. OperationProof therefore does **not** re-run the unused-grant admission check in this stage.
 
-Instead it requires both `consumption_resolver` and `consumption_verifier`. The resolver obtains authoritative V-One `grant-consumption-witness/v1` by grant JTI. The witness must have the exact V-One field contract and bind:
+Instead it requires both `consumption_resolver` and `consumption_verifier`. The resolver obtains authoritative V-One `grant-consumption-witness/v1` by grant JTI. The witness must have the exact V-One field contract, exact integer `schema_version == 1`, and bind:
 
 - grant JTI and grant ID
 - native grant digest
