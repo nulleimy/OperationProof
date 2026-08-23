@@ -16,6 +16,7 @@ _INTEGRITY_ONLY_SCOPE = "EXECUTION_EVIDENCE_INTEGRITY"
 _POST_STATE_SCOPE = "EXECUTION_OUTCOME_AND_PROVIDER_POST_STATE"
 _POST_STATE_CLASS = "INDEPENDENT_PROVIDER_OBSERVATION"
 _OUTCOME_SCOPES = {"EXECUTION_OUTCOME", _POST_STATE_SCOPE}
+_SUPPORTED_VERIFICATION_STRENGTHS = {"V2", "V3"}
 
 
 class CaserExecutionError(ValueError):
@@ -130,6 +131,34 @@ def _claims(verification: Mapping[str, Any]) -> tuple[bool, bool, bool]:
     assert isinstance(outcome, bool)
     assert isinstance(post_state, bool)
     return integrity, outcome, post_state
+
+
+def _validate_strength_contract(
+    verification: Mapping[str, Any],
+    *,
+    outcome_verified: bool,
+    post_state_verified: bool,
+) -> None:
+    """Prevent verification-strength labels from being used to escalate assurance.
+
+    The evidenced CASER V2 contract is integrity-only. A V2 document that claims an
+    independently verified execution outcome or provider post-state is contradictory
+    and is rejected rather than being normalized into stronger execution evidence.
+    Stronger execution claims are accepted only under the explicit V3 contract and
+    remain subject to the independent scope/check/class gates below.
+    """
+
+    strength = verification.get("verificationStrength")
+    scope = verification.get("verificationScope")
+    if strength not in _SUPPORTED_VERIFICATION_STRENGTHS:
+        raise CaserExecutionError("UNSUPPORTED_CASER_VERIFICATION_STRENGTH")
+    if strength == "V2":
+        if scope != _INTEGRITY_ONLY_SCOPE:
+            raise CaserExecutionError("CASER_V2_OUTSIDE_INTEGRITY_ONLY_SCOPE")
+        if outcome_verified or post_state_verified:
+            raise CaserExecutionError("CASER_V2_CLAIM_ESCALATION")
+    elif (outcome_verified or post_state_verified) and strength != "V3":
+        raise CaserExecutionError("CASER_STRONG_CLAIM_REQUIRES_V3")
 
 
 def _verified_outcome(
@@ -281,6 +310,11 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("CASER_CONTENT_IDENTITY_CHECK_MISMATCH")
 
         integrity_verified, outcome_verified, post_state_claim = _claims(verification)
+        _validate_strength_contract(
+            verification,
+            outcome_verified=outcome_verified,
+            post_state_verified=post_state_claim,
+        )
         outcome = _verified_outcome(
             verification,
             checks,
