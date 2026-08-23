@@ -98,10 +98,10 @@ def parse_rfc3339(value: object) -> ParsedTimestamp:
     base_second = min(second, 59)
     try:
         local_base = datetime(year, month, day, hour, minute, base_second, tzinfo=UTC)
-    except ValueError as exc:
-        raise ValueError("invalid RFC3339 calendar value") from exc
+        utc_base = local_base - timedelta(seconds=offset_seconds)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("invalid RFC3339 calendar or UTC-normalized value") from exc
 
-    utc_base = local_base - timedelta(seconds=offset_seconds)
     posix_whole = _posix_whole_seconds(utc_base)
 
     if second == 60:
