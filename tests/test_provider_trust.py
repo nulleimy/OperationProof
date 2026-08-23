@@ -144,6 +144,31 @@ def test_final_proof_recursively_requires_pre_and_execution_provider_trust() -> 
     assert "UNREGISTERED_PROVIDER:execution:test:execution" in result.reason_codes
 
 
+def test_final_cannot_change_context_used_to_trust_embedded_pre() -> None:
+    pre_items = [evidence(layer) for layer in PRE_LAYERS]
+    execution = evidence(Layer.EXECUTION)
+    pre = build_pre_proof("op-1", pre_items)
+    final = build_final_proof(pre, execution)
+
+    overrides: dict[tuple[str, str], object] = {
+        (item.layer.value, item.provider): (
+            lambda envelope, context: getattr(context, "root_phase", None) == "FINAL"
+        )
+        for item in pre_items
+    }
+    registry = registry_for(pre_items + [execution], overrides=overrides)
+
+    pre_result = verify_proof_trust(pre, registry)
+    assert pre_result.trusted is False
+
+    final_result = verify_proof_trust(final, registry)
+    assert final_result.trusted is False
+    assert any(
+        code.startswith("UNTRUSTED_PROVIDER_EVIDENCE:")
+        for code in final_result.reason_codes
+    )
+
+
 def test_execution_verifier_receives_exact_final_pre_proof_context() -> None:
     pre_items = [evidence(layer) for layer in PRE_LAYERS]
     execution = evidence(Layer.EXECUTION)
