@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from fractions import Fraction
 from typing import Any
 
 from ..canonical import sha256_digest, valid_digest
@@ -63,10 +62,11 @@ class ExecutionReceiptError(ValueError):
 
 ReceiptVerifier = Callable[[Mapping[str, Any]], bool]
 ReceiptResolver = Callable[[str], Mapping[str, Any] | None]
+ParsedTimestamp = tuple[int, str]
 
 
-def _parse_timestamp(value: Any, code: str) -> Fraction:
-    """Parse RFC 3339 into exact UTC seconds without fractional rounding."""
+def _parse_timestamp(value: Any, code: str) -> ParsedTimestamp:
+    """Parse RFC 3339 into exact UTC whole seconds plus raw fractional digits."""
 
     if not isinstance(value, str) or not value:
         raise ExecutionReceiptError(code)
@@ -101,16 +101,30 @@ def _parse_timestamp(value: Any, code: str) -> Fraction:
         raise ExecutionReceiptError(code) from exc
 
     delta = base - _EPOCH
-    exact_seconds = Fraction(delta.days * 86400 + delta.seconds, 1)
+    whole_seconds = delta.days * 86400 + delta.seconds
     if second == 60:
-        exact_seconds += 1
+        whole_seconds += 1
+    whole_seconds -= offset_seconds
 
     fraction = match.group("fraction")
-    if fraction is not None:
-        digits = fraction[1:]
-        exact_seconds += Fraction(int(digits), 10 ** len(digits))
+    fraction_digits = "" if fraction is None else fraction[1:]
+    return whole_seconds, fraction_digits
 
-    return exact_seconds - offset_seconds
+
+def _timestamp_precedes(left: ParsedTimestamp, right: ParsedTimestamp) -> bool:
+    left_whole, left_fraction = left
+    right_whole, right_fraction = right
+    if left_whole != right_whole:
+        return left_whole < right_whole
+
+    common_length = min(len(left_fraction), len(right_fraction))
+    left_common = left_fraction[:common_length]
+    right_common = right_fraction[:common_length]
+    if left_common != right_common:
+        return left_common < right_common
+    if len(left_fraction) < len(right_fraction):
+        return any(digit != "0" for digit in right_fraction[common_length:])
+    return False
 
 
 def _receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
@@ -155,7 +169,7 @@ def _validate_receipt(
     completed_at = receipt.get("completed_at")
     started = _parse_timestamp(started_at, "INVALID_EXECUTION_STARTED_AT")
     completed = _parse_timestamp(completed_at, "INVALID_EXECUTION_COMPLETED_AT")
-    if completed < started:
+    if _timestamp_precedes(completed, started):
         raise ExecutionReceiptError("INVALID_EXECUTION_TIME_WINDOW")
 
     receipt_digest = receipt.get("receipt_digest")
