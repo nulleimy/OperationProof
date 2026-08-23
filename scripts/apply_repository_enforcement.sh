@@ -37,6 +37,8 @@ policy = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 branch = policy.get("branch")
 if not isinstance(branch, str) or not branch:
     raise SystemExit("invalid governance branch")
+if "restrictions" not in policy or policy.get("restrictions") is not None:
+    raise SystemExit("governance restrictions must be explicitly null")
 print(branch)
 PY
 )"
@@ -66,7 +68,7 @@ payload = {
         "required_approving_review_count": pull["required_approving_review_count"],
         "require_last_push_approval": pull["require_last_push_approval"],
     } if pull["required"] else None,
-    "restrictions": None,
+    "restrictions": policy["restrictions"],
     "required_conversation_resolution": policy["required_conversation_resolution"],
     "allow_force_pushes": policy["allow_force_pushes"],
     "allow_deletions": policy["allow_deletions"],
