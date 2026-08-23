@@ -24,15 +24,22 @@ _VERIFICATION_INVOCATION: ContextVar[_VerificationStageInvocation | None] = Cont
 )
 
 
+def _current_verification_stage() -> str:
+    """Return the trusted stage only for an active provider-verifier invocation."""
+
+    invocation = _VERIFICATION_INVOCATION.get()
+    if invocation is None or invocation.active is not True:
+        return DIRECT_VERIFICATION_STAGE
+    return invocation.stage
+
+
 @dataclass(frozen=True, slots=True)
 class TrustVerificationContext:
     """Trusted context derived from one structurally verified proof scope.
 
-    The dataclass field contract intentionally remains the original six-field R3
-    contract. ``verification_stage`` is an ephemeral callback-time property backed
-    by a private, revocable invocation marker. The marker is not serialized and is
-    revoked when the provider callback returns, including in contexts inherited by
-    child asyncio tasks.
+    This remains the original six-field R3 public contract. Stateful provider stage
+    information is deliberately kept out of this object and is available only to
+    internal provider-specific trust code while its verifier invocation is active.
     """
 
     root_phase: str
@@ -41,15 +48,6 @@ class TrustVerificationContext:
     proof_digest: str
     pre_proof_digest: str | None
     evidence_index: int
-
-    @property
-    def verification_stage(self) -> str:
-        """Return the trusted stage only for an active provider-verifier invocation."""
-
-        invocation = _VERIFICATION_INVOCATION.get()
-        if invocation is None or invocation.active is not True:
-            return DIRECT_VERIFICATION_STAGE
-        return invocation.stage
 
 
 EvidenceTrustVerifier = Callable[[Mapping[str, Any], TrustVerificationContext], bool]
@@ -216,8 +214,8 @@ def verify_proof_trust(
     PRE evidence is always verified in the PRE proof's own trusted context. FINAL
     verification recursively verifies the exact embedded PRE proof with a trusted
     callback-time post-execution stage while retaining that PRE proof's own phase,
-    digest, operation id, and absent ``pre_proof_digest``. The stage is not a
-    serialized/dataclass field and its invocation marker is revoked on callback exit,
+    digest, operation id, and absent ``pre_proof_digest``. The stage stays outside
+    the public context and its invocation marker is revoked on callback exit,
     preventing proof-controlled or child-task stage laundering while preserving the
     original ProviderTrustRegistry context contract.
     """
