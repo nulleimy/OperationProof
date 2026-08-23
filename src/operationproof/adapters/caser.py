@@ -87,14 +87,15 @@ def _claims(verification: Mapping[str, Any]) -> tuple[bool, bool, bool]:
     claims = verification.get("claims")
     if not isinstance(claims, Mapping):
         raise CaserExecutionError("INVALID_CASER_VERIFICATION_CLAIMS")
-    values = (
-        claims.get("receiptIntegrityVerified"),
-        claims.get("executionOutcomeIndependentlyVerified"),
-        claims.get("providerPostStateVerified"),
-    )
-    if not all(isinstance(value, bool) for value in values):
+    integrity = claims.get("receiptIntegrityVerified")
+    outcome = claims.get("executionOutcomeIndependentlyVerified")
+    post_state = claims.get("providerPostStateVerified")
+    if not all(isinstance(value, bool) for value in (integrity, outcome, post_state)):
         raise CaserExecutionError("INVALID_CASER_VERIFICATION_CLAIM_TYPE")
-    return values  # type: ignore[return-value]
+    assert isinstance(integrity, bool)
+    assert isinstance(outcome, bool)
+    assert isinstance(post_state, bool)
+    return integrity, outcome, post_state
 
 
 class CaserExecutionAdapter:
@@ -217,7 +218,7 @@ class CaserExecutionAdapter:
 
         try:
             trusted_binding = binding_verifier(binding)
-        except Exception as exc:  # noqa: BLE001 - external verifier boundary must fail closed
+        except Exception as exc:
             raise CaserExecutionError("CASER_BINDING_VERIFICATION_ERROR") from exc
         if trusted_binding is not True:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
@@ -268,10 +269,9 @@ class CaserExecutionAdapter:
         elif outcome != ExecutionOutcome.SUCCEEDED:
             decision = "EXECUTION_INSUFFICIENT"
             verdict = Verdict.UNKNOWN
-        elif effect == ExecutionEffect.READ_ONLY:
-            decision = "EXECUTION_VERIFIED"
-            verdict = Verdict.PASS
-        elif effect == ExecutionEffect.MUTATING and post_state_verified:
+        elif effect == ExecutionEffect.READ_ONLY or (
+            effect == ExecutionEffect.MUTATING and post_state_verified
+        ):
             decision = "EXECUTION_VERIFIED"
             verdict = Verdict.PASS
         else:
