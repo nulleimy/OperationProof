@@ -51,6 +51,15 @@ def _parse_time(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _unexpected_evidence_fields(item: dict[str, Any], *, index: int) -> str | None:
+    unexpected_fields = sorted(set(item) - _EVIDENCE_FIELDS)
+    if not unexpected_fields:
+        return None
+    layer = item.get("layer")
+    layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
+    return f"UNEXPECTED_EVIDENCE_FIELDS:{layer_name}:" + ",".join(unexpected_fields)
+
+
 def _validate_evidence_envelope(
     item: Any,
     *,
@@ -64,11 +73,9 @@ def _validate_evidence_envelope(
     layer = item.get("layer")
     layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
 
-    unexpected_fields = sorted(set(item) - _EVIDENCE_FIELDS)
-    if unexpected_fields:
-        reasons.append(
-            f"UNEXPECTED_EVIDENCE_FIELDS:{layer_name}:" + ",".join(unexpected_fields)
-        )
+    unexpected_reason = _unexpected_evidence_fields(item, index=index)
+    if unexpected_reason is not None:
+        reasons.append(unexpected_reason)
 
     if item.get("schema") != "operationproof.evidence-envelope.v1":
         reasons.append(f"UNSUPPORTED_EVIDENCE_SCHEMA:{layer_name}")
@@ -258,6 +265,12 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     if not isinstance(evidence, list):
         integrity.append("INVALID_EVIDENCE")
         evidence = []
+    else:
+        for index, item in enumerate(evidence):
+            if isinstance(item, dict):
+                unexpected_reason = _unexpected_evidence_fields(item, index=index)
+                if unexpected_reason is not None:
+                    integrity.append(unexpected_reason)
 
     semantic_reasons: list[str] = []
     if phase == "PRE" and isinstance(operation_id, str):
