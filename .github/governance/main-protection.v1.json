@@ -13,7 +13,8 @@
     "dismiss_stale_reviews": true,
     "require_code_owner_reviews": false,
     "required_approving_review_count": 0,
-    "require_last_push_approval": false
+    "require_last_push_approval": false,
+    "allow_bypass": false
   },
   "enforce_admins": true,
   "required_conversation_resolution": true,
