@@ -12,12 +12,27 @@ Required controls:
 - PR gate enabled
 - stale review dismissal enabled
 - zero mandatory human approvals, so a single-maintainer repository is not deadlocked
+- PR bypass actors forbidden
 - conversation resolution required
 - administrator enforcement enabled
 - force pushes disabled
 - branch deletion disabled
 
-Independent Codex review remains an OperationProof release gate, but it is not represented as a GitHub required approval because the current Codex integration publishes a review verdict/comment rather than a formal `APPROVE` review state.
+## Merge authority
+
+Codex is an **independent advisory verifier, not merge authority**.
+
+Codex findings are evidence and should be addressed when available, especially security or correctness findings. However, a pending Codex reaction or missing Codex response must not be able to deadlock the repository and is not a hard merge gate.
+
+Hard merge gates are deterministic and GitHub-enforceable:
+
+- exact-head required CI contexts succeed;
+- no unresolved blocking review threads remain;
+- the PR is mergeable against the intended base;
+- the expected PR head SHA is used when merging;
+- once G0 is live, GitHub server-side branch protection enforces the canonical policy.
+
+Codex is not represented as a GitHub required approval because the integration publishes advisory review comments/reactions rather than a formal repository authority signal. `👀` means review activity, not authorization and not a merge lock.
 
 ## Apply
 
@@ -61,7 +76,7 @@ G0 may be called fully enforced only after the live GitHub branch endpoint repor
 
 ## Required status check stability
 
-The canonical CI workflow keeps the job id `test` and Python matrix values `3.12` / `3.13`, yielding the required contexts:
+The canonical CI workflow explicitly pins the rendered job name `test (${{ matrix.python-version }})` with Python matrix values `3.12` / `3.13`, yielding the required contexts:
 
 - `test (3.12)`
 - `test (3.13)`
