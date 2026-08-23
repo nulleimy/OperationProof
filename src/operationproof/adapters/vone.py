@@ -260,7 +260,12 @@ def _validate_grant(
 ) -> tuple[datetime, datetime, str]:
     if set(grant) != _GRANT_FIELDS:
         raise VOneAuthorizationError("INVALID_VONE_GRANT_FIELDS")
-    if grant.get("schema_version") != 2 or grant.get("grant_type") != _GRANT_TYPE:
+    schema_version = grant.get("schema_version")
+    if (
+        type(schema_version) is not int
+        or schema_version != 2
+        or grant.get("grant_type") != _GRANT_TYPE
+    ):
         raise VOneAuthorizationError("INVALID_VONE_GRANT_PROTOCOL")
 
     for field in _TEXT_FIELDS:
@@ -320,8 +325,10 @@ def _validate_consumption_witness(
 ) -> None:
     if set(witness) != _CONSUMPTION_FIELDS:
         raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_FIELDS")
+    schema_version = witness.get("schema_version")
     if (
-        witness.get("schema_version") != 1
+        type(schema_version) is not int
+        or schema_version != 1
         or witness.get("witness_type") != _CONSUMPTION_WITNESS_TYPE
     ):
         raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_PROTOCOL")
