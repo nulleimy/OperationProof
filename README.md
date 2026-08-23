@@ -17,27 +17,32 @@ OperationProof does not replace identity, authorization, continuity, tool-safety
 
 The first seven layers form a `PreOperationProof`. Execution evidence can exist only after execution and is bound into a `FinalOperationProof`.
 
+## Two verification gates
+
+OperationProof deliberately separates content integrity from provider authenticity:
+
+```text
+verify_proof()        -> canonical structure, digests, deterministic semantics
+verify_proof_trust()  -> trusted provider verification via out-of-band registry
+```
+
+A structurally valid proof is not automatically trusted. Governed execution should require both gates.
+
 ## Non-goals
 
 OperationProof is not an IAM platform, policy engine, agent runtime, sandbox, DLP engine, observability backend, lineage platform, budget manager, or LLM judge. Providers remain external and are integrated through narrow adapters.
 
-## Core rule
+## Core rules
 
-`UNKNOWN`, missing evidence, invalid digests, stale/expired evidence, operation mismatches, and duplicate layer claims are never promoted to success.
+`UNKNOWN`, missing evidence, invalid digests, stale/expired evidence, operation mismatches, duplicate layer claims, unregistered providers, and provider-verifier failures are never promoted to success.
 
 ## Development baseline
 
-R0-R1 establishes:
+R0-R1 establishes the protocol kernel: constitution, eight-layer evidence model, canonicalization, PRE/FINAL proofs, schemas, verifier, CLI, tests and CI.
 
-- constitution and trust model;
-- canonical eight-layer evidence model;
-- deterministic JSON canonicalization and SHA-256 content addressing;
-- fail-closed pre-operation composition;
-- final proof binding to execution evidence;
-- generic provider adapter protocol;
-- core verifier and CLI;
-- JSON Schemas;
-- tests and CI.
+R2 adds the first real provider adapter: HOWEDO continuity evidence with a trusted operation/freshness binding.
+
+R3 adds the provider trust gate: a fail-closed `(layer, provider)` registry and `verify_proof_trust()` so serialized evidence cannot become authoritative merely by claiming a provider name and recomputing local digests.
 
 ## Local verification
 
