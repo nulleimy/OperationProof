@@ -2,15 +2,24 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final
 
 from .domain import Layer
 from .verifier import verify_proof
 
+DIRECT_VERIFICATION_STAGE: Final = "DIRECT"
+EMBEDDED_PRE_OF_FINAL_STAGE: Final = "EMBEDDED_PRE_OF_FINAL"
+
 
 @dataclass(frozen=True, slots=True)
 class TrustVerificationContext:
-    """Trusted context derived from one structurally verified proof scope."""
+    """Trusted context derived from one structurally verified proof scope.
+
+    ``verification_stage`` is generated only by OperationProof's verifier. It is not
+    serialized in a proof and therefore cannot be selected by an untrusted sender.
+    Root/evidence phase semantics remain unchanged: embedded PRE evidence is still
+    verified against the PRE proof's own digest and operation context.
+    """
 
     root_phase: str
     evidence_phase: str
@@ -18,6 +27,7 @@ class TrustVerificationContext:
     proof_digest: str
     pre_proof_digest: str | None
     evidence_index: int
+    verification_stage: str = DIRECT_VERIFICATION_STAGE
 
 
 EvidenceTrustVerifier = Callable[[Mapping[str, Any], TrustVerificationContext], bool]
@@ -100,18 +110,14 @@ def _verify_evidence_trust(
     return []
 
 
-def verify_proof_trust(
+def _verify_proof_trust_at_stage(
     proof: dict[str, Any],
     registry: ProviderTrustRegistry,
+    *,
+    verification_stage: str,
 ) -> TrustVerificationResult:
-    """Verify provider authenticity after structural proof verification.
-
-    PRE evidence is always verified in the PRE proof's own trusted context. FINAL
-    verification first requires that exact embedded PRE proof to pass recursively,
-    then verifies only FINAL execution evidence with the outer FINAL context. This
-    prevents a FINAL wrapper from changing the trust context under which PRE evidence
-    is evaluated.
-    """
+    if verification_stage not in {DIRECT_VERIFICATION_STAGE, EMBEDDED_PRE_OF_FINAL_STAGE}:
+        return TrustVerificationResult(False, ("INVALID_TRUST_VERIFICATION_STAGE",))
 
     integrity = verify_proof(proof)
     if not integrity.valid:
@@ -138,7 +144,11 @@ def verify_proof_trust(
         pre_proof = proof.get("pre_proof")
         if not isinstance(pre_proof, dict):
             return TrustVerificationResult(False, ("INVALID_TRUST_PRE_PROOF",))
-        pre_result = verify_proof_trust(pre_proof, registry)
+        pre_result = _verify_proof_trust_at_stage(
+            pre_proof,
+            registry,
+            verification_stage=EMBEDDED_PRE_OF_FINAL_STAGE,
+        )
         reasons.extend(pre_result.reason_codes)
 
     evidence = proof.get("evidence")
@@ -153,6 +163,7 @@ def verify_proof_trust(
                 proof_digest=proof_digest,
                 pre_proof_digest=pre_proof_digest,
                 evidence_index=index,
+                verification_stage=verification_stage,
             )
             reasons.extend(
                 _verify_evidence_trust(item, context=context, registry=registry)
@@ -161,4 +172,25 @@ def verify_proof_trust(
     return TrustVerificationResult(
         trusted=not reasons,
         reason_codes=tuple(sorted(set(reasons))),
+    )
+
+
+def verify_proof_trust(
+    proof: dict[str, Any],
+    registry: ProviderTrustRegistry,
+) -> TrustVerificationResult:
+    """Verify provider authenticity after structural proof verification.
+
+    PRE evidence is always verified in the PRE proof's own trusted context. FINAL
+    verification recursively verifies the exact embedded PRE proof with a trusted
+    post-execution stage marker while retaining that PRE proof's own phase, digest,
+    operation id, and absent ``pre_proof_digest``. This prevents FINAL context
+    laundering while allowing stateful providers to distinguish initial admission
+    from post-execution evidence revalidation.
+    """
+
+    return _verify_proof_trust_at_stage(
+        proof,
+        registry,
+        verification_stage=DIRECT_VERIFICATION_STAGE,
     )
