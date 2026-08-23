@@ -124,7 +124,10 @@ def parse_rfc3339(value: object) -> ParsedTimestamp:
 def timestamp_from_datetime(value: datetime) -> ParsedTimestamp:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("datetime must be timezone-aware")
-    normalized = value.astimezone(UTC)
+    try:
+        normalized = value.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("datetime cannot be normalized to UTC") from exc
     whole = normalized.replace(microsecond=0)
     posix_whole = _posix_whole_seconds(whole)
     exact_whole = posix_whole + bisect_right(_LEAP_BOUNDARIES_POSIX, posix_whole)
