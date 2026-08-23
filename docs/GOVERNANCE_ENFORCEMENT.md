@@ -13,7 +13,7 @@ Required controls:
 - stale review dismissal enabled
 - zero mandatory human approvals, so a single-maintainer repository is not deadlocked
 - PR bypass actors forbidden
-- branch push restrictions explicitly cleared (`restrictions: null`)
+- branch push restrictions cleared where GitHub exposes that capability
 - conversation resolution required
 - administrator enforcement enabled
 - force pushes disabled
@@ -61,7 +61,13 @@ python3 scripts/verify_repository_enforcement.py --repo nulleimy/OperationProof
 
 A successful verification emits one compact JSON record with `verified:true` and exits `0`. Any missing, weakened, inaccessible, or malformed protection state exits non-zero.
 
-The verifier also rejects push-restriction drift. The canonical G0 state explicitly requires `restrictions: null`; non-null or missing live restriction state is not accepted as equivalent.
+### Push-restriction capability boundary
+
+The canonical policy still expresses the desired state as `restrictions: null`, meaning no branch push restrictions are intended.
+
+GitHub does not expose branch push restrictions uniformly for every repository owner type. For a repository owned by a personal `User`, the branch-protection response may omit the `restrictions` field because that capability is unavailable. In that case, omission is accepted as the platform representation of "no configurable push restrictions" and does not weaken G0.
+
+For an `Organization`-owned repository, missing `restrictions` remains fail-closed because the capability is expected to be observable. Any non-null live restrictions are rejected for every owner type. Unknown or unrecognized owner types also fail closed.
 
 ## Trust boundary
 
