@@ -68,7 +68,35 @@ def test_unknown_evidence_field_fails_even_after_proof_digest_recomputation() ->
     assert decision.value == "REJECTED"
     assert any(reason.startswith("UNEXPECTED_EVIDENCE_FIELDS:") for reason in reasons)
     assert result.valid is False
-    assert "DECISION_MISMATCH" in result.reason_codes
+    assert any(
+        reason.startswith("UNEXPECTED_EVIDENCE_FIELDS:") for reason in result.reason_codes
+    )
+    assert "PROOF_DIGEST_MISMATCH" not in result.reason_codes
+
+
+def test_self_consistent_rejected_proof_cannot_launder_unknown_evidence_field() -> None:
+    proof = _pre_proof()
+    evidence = deepcopy(proof["evidence"])
+    assert isinstance(evidence, list)
+    first = evidence[0]
+    assert isinstance(first, dict)
+    first["unsigned_extension"] = {"looks": "documented"}
+    proof["evidence"] = evidence
+
+    decision, reasons = evaluate_pre_semantics(str(proof["operation_id"]), evidence)
+    assert decision.value == "REJECTED"
+    proof["decision"] = decision.value
+    proof["reason_codes"] = reasons
+    _recompute_proof_digest(proof)
+
+    result = verify_proof(proof)
+
+    assert result.valid is False
+    assert any(
+        reason.startswith("UNEXPECTED_EVIDENCE_FIELDS:") for reason in result.reason_codes
+    )
+    assert "DECISION_MISMATCH" not in result.reason_codes
+    assert "REASON_CODES_MISMATCH" not in result.reason_codes
     assert "PROOF_DIGEST_MISMATCH" not in result.reason_codes
 
 
