@@ -187,6 +187,15 @@ def _document_digest(grant: Mapping[str, Any]) -> str:
     return sha256_digest(dict(grant))
 
 
+def _validate_now(value: object) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise VOneAuthorizationError("INVALID_VERIFICATION_NOW")
+    try:
+        return value.astimezone(UTC)
+    except (ValueError, OverflowError) as exc:
+        raise VOneAuthorizationError("INVALID_VERIFICATION_NOW") from exc
+
+
 def _validate_grant(
     *,
     grant: Mapping[str, Any],
@@ -230,11 +239,7 @@ def _validate_grant(
         raise VOneAuthorizationError("VONE_GRANT_TTL_EXCEEDED")
     if (issued - checked).total_seconds() > _MAX_PRECONDITION_TO_GRANT_SECONDS:
         raise VOneAuthorizationError("VONE_PRECONDITION_TOO_OLD")
-    try:
-        now_utc = now.astimezone(UTC)
-    except (ValueError, OverflowError) as exc:
-        raise VOneAuthorizationError("INVALID_VERIFICATION_NOW") from exc
-    if expires <= now_utc:
+    if expires <= _validate_now(now):
         raise VOneAuthorizationError("EXPIRED_VONE_GRANT")
 
     grant_digest = str(grant.get("grant_digest"))
