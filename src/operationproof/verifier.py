@@ -281,9 +281,17 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
         decision, semantic_reasons = evaluate_pre_semantics(operation_id, evidence)
         expected_decision = decision.value
     elif phase == "FINAL":
+        pre_proof = proof.get("pre_proof")
+        if isinstance(pre_proof, dict):
+            pre_integrity = verify_proof(pre_proof)
+            if not pre_integrity.valid:
+                integrity.append("PRE_PROOF_INTEGRITY_INVALID")
+                integrity.extend(
+                    f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
+                )
         decision, semantic_reasons = evaluate_final_semantics(
             operation_id=operation_id,
-            pre_proof=proof.get("pre_proof"),
+            pre_proof=pre_proof,
             pre_digest=proof.get("pre_proof_digest"),
             evidence=evidence,
         )
