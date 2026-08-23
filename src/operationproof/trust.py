@@ -10,7 +10,7 @@ from .verifier import verify_proof
 
 @dataclass(frozen=True, slots=True)
 class TrustVerificationContext:
-    """Trusted context derived from the structurally verified outer proof."""
+    """Trusted context derived from one structurally verified proof scope."""
 
     root_phase: str
     evidence_phase: str
@@ -100,32 +100,17 @@ def _verify_evidence_trust(
     return []
 
 
-def _collect_evidence_with_phase(proof: Mapping[str, Any]) -> list[tuple[Any, str]]:
-    collected: list[tuple[Any, str]] = []
-    if proof.get("phase") == "FINAL":
-        pre_proof = proof.get("pre_proof")
-        if isinstance(pre_proof, Mapping):
-            pre_evidence = pre_proof.get("evidence")
-            if isinstance(pre_evidence, list):
-                collected.extend((item, "PRE") for item in pre_evidence)
-
-    evidence = proof.get("evidence")
-    if isinstance(evidence, list):
-        evidence_phase = str(proof.get("phase"))
-        collected.extend((item, evidence_phase) for item in evidence)
-    return collected
-
-
 def verify_proof_trust(
     proof: dict[str, Any],
     registry: ProviderTrustRegistry,
 ) -> TrustVerificationResult:
-    """Verify provider authenticity/trust after structural proof verification.
+    """Verify provider authenticity after structural proof verification.
 
-    The provider callback receives only an evidence envelope plus immutable context
-    derived from the already structurally verified outer proof. In particular, an
-    execution provider can bind its receipt to ``context.pre_proof_digest`` instead
-    of trusting a pre-proof identifier supplied by the evidence itself.
+    PRE evidence is always verified in the PRE proof's own trusted context. FINAL
+    verification first requires that exact embedded PRE proof to pass recursively,
+    then verifies only FINAL execution evidence with the outer FINAL context. This
+    prevents a FINAL wrapper from changing the trust context under which PRE evidence
+    is evaluated.
     """
 
     integrity = verify_proof(proof)
@@ -146,16 +131,30 @@ def verify_proof_trust(
     )
 
     reasons: list[str] = []
-    for index, (item, evidence_phase) in enumerate(_collect_evidence_with_phase(proof)):
-        context = TrustVerificationContext(
-            root_phase=root_phase,
-            evidence_phase=evidence_phase,
-            operation_id=operation_id,
-            proof_digest=proof_digest,
-            pre_proof_digest=pre_proof_digest,
-            evidence_index=index,
-        )
-        reasons.extend(_verify_evidence_trust(item, context=context, registry=registry))
+
+    if root_phase == "FINAL":
+        pre_proof = proof.get("pre_proof")
+        if not isinstance(pre_proof, dict):
+            return TrustVerificationResult(False, ("INVALID_TRUST_PRE_PROOF",))
+        pre_result = verify_proof_trust(pre_proof, registry)
+        reasons.extend(pre_result.reason_codes)
+
+    evidence = proof.get("evidence")
+    if not isinstance(evidence, list):
+        reasons.append("INVALID_TRUST_EVIDENCE_COLLECTION")
+    else:
+        for index, item in enumerate(evidence):
+            context = TrustVerificationContext(
+                root_phase=root_phase,
+                evidence_phase=root_phase,
+                operation_id=operation_id,
+                proof_digest=proof_digest,
+                pre_proof_digest=pre_proof_digest,
+                evidence_index=index,
+            )
+            reasons.extend(
+                _verify_evidence_trust(item, context=context, registry=registry)
+            )
 
     return TrustVerificationResult(
         trusted=not reasons,
