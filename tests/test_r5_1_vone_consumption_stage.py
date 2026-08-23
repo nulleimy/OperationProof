@@ -19,7 +19,7 @@ from operationproof.trust import ProviderTrustRegistry, verify_proof_trust
 
 _OPERATION_ID = "execution-r5-1"
 _ADMISSION_NOW = datetime(2099, 1, 1, 0, 0, 30, tzinfo=UTC)
-_POST_NOW = datetime(2099, 1, 1, 0, 2, 0, tzinfo=UTC)
+_POST_NOW = datetime(2099, 1, 1, 0, 0, 50, tzinfo=UTC)
 
 
 def _native_digest(label: str) -> str:
@@ -292,7 +292,7 @@ def test_consumption_after_grant_expiry_is_rejected() -> None:
     assert verify_proof_trust(final, registry).trusted is False
 
 
-def test_post_execution_verification_can_happen_after_grant_expiry() -> None:
+def test_consumption_witness_does_not_extend_grant_lifetime() -> None:
     grant = _grant()
     witness = _consumption(grant)
     _pre, final = _proofs(grant)
@@ -303,7 +303,7 @@ def test_post_execution_verification_can_happen_after_grant_expiry() -> None:
         post_now=datetime(2099, 1, 1, 0, 5, 0, tzinfo=UTC),
     )
 
-    assert verify_proof_trust(final, registry).trusted is True
+    assert verify_proof_trust(final, registry).trusted is False
 
 
 def test_consumption_witness_tamper_fails_final_closed() -> None:
