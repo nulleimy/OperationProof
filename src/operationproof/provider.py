@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .canonical import canonical_json_bytes, valid_digest
-from .domain import EvidenceEnvelope, Layer
+from .domain import EvidenceEnvelope, Layer, Verdict
 from .rfc3339 import compare_timestamps, parse_rfc3339
 
 PROVIDER_ADAPTER_CONTRACT = "operationproof.provider-adapter.v1"
@@ -149,7 +149,9 @@ def validate_adapter_output(
 
     if envelope.schema != manifest.output_schema:
         reasons.append("ADAPTER_OUTPUT_SCHEMA_MISMATCH")
-    if envelope.layer is not manifest.layer:
+    if not isinstance(envelope.layer, Layer):
+        reasons.append("INVALID_ADAPTER_OUTPUT_LAYER")
+    elif envelope.layer is not manifest.layer:
         reasons.append("ADAPTER_OUTPUT_LAYER_MISMATCH")
     if envelope.provider != manifest.provider_id:
         reasons.append("ADAPTER_OUTPUT_PROVIDER_MISMATCH")
@@ -157,12 +159,16 @@ def validate_adapter_output(
         reasons.append("ADAPTER_OUTPUT_OPERATION_ID_MISMATCH")
     if not isinstance(envelope.decision, str) or not envelope.decision:
         reasons.append("INVALID_ADAPTER_OUTPUT_DECISION")
-    if not valid_digest(envelope.subject_digest):
+    if not isinstance(envelope.verdict, Verdict):
+        reasons.append("INVALID_ADAPTER_OUTPUT_VERDICT")
+    if not isinstance(envelope.subject_digest, str) or not valid_digest(envelope.subject_digest):
         reasons.append("INVALID_ADAPTER_OUTPUT_SUBJECT_DIGEST")
-    if not valid_digest(envelope.evidence_digest):
+    if not isinstance(envelope.evidence_digest, str) or not valid_digest(envelope.evidence_digest):
         reasons.append("INVALID_ADAPTER_OUTPUT_EVIDENCE_DIGEST")
     if not isinstance(envelope.metadata, dict):
         reasons.append("INVALID_ADAPTER_OUTPUT_METADATA")
+    elif envelope.metadata.get("adapter") != manifest.adapter_id:
+        reasons.append("ADAPTER_OUTPUT_ADAPTER_ID_MISMATCH")
 
     issued = None
     try:
@@ -180,7 +186,7 @@ def validate_adapter_output(
 
     try:
         canonical_json_bytes(envelope.to_dict())
-    except (TypeError, ValueError, OverflowError, RecursionError):
+    except (AttributeError, TypeError, ValueError, OverflowError, RecursionError):
         reasons.append("ADAPTER_OUTPUT_NOT_CANONICAL_JSON")
 
     return AdapterOutputValidationResult(
