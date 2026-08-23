@@ -175,7 +175,7 @@ def test_failure_scenario_returning_evidence_is_a_conformance_failure() -> None:
     cases = tuple(
         ProviderConformanceCase(
             scenario,
-            envelope if scenario is not ConformanceScenario.AUTHORITY_ERROR else envelope,
+            envelope,
             "op-r9",
         )
         for scenario in ConformanceScenario
