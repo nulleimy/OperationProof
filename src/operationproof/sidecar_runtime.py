@@ -85,18 +85,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         import uvicorn
-        from .sidecar import create_app
+        from .sidecar import SidecarConfigError, create_app
     except ModuleNotFoundError as exc:
         parser.error(
             "sidecar dependencies are missing; install operationproof[sidecar]"
         )
         raise AssertionError("unreachable") from exc
 
-    app = create_app(
-        registry,
-        require_trust=not args.allow_integrity_only,
-        max_body_bytes=args.max_body_bytes,
-    )
+    try:
+        app = create_app(
+            registry,
+            require_trust=not args.allow_integrity_only,
+            max_body_bytes=args.max_body_bytes,
+        )
+    except SidecarConfigError as exc:
+        parser.error(str(exc))
+
     uvicorn.run(
         app,
         host=args.host,
