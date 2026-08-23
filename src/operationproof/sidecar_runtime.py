@@ -20,7 +20,7 @@ def load_trust_registry(factory_spec: str) -> ProviderTrustRegistry:
 
     try:
         module = importlib.import_module(module_name)
-    except Exception as exc:  # noqa: BLE001 - deployment bootstrap must fail closed
+    except Exception as exc:
         raise TrustFactoryError("TRUST_FACTORY_IMPORT_FAILED") from exc
 
     factory = getattr(module, attribute_name, None)
@@ -29,7 +29,7 @@ def load_trust_registry(factory_spec: str) -> ProviderTrustRegistry:
 
     try:
         registry = factory()
-    except Exception as exc:  # noqa: BLE001 - deployment bootstrap must fail closed
+    except Exception as exc:
         raise TrustFactoryError("TRUST_FACTORY_EXECUTION_FAILED") from exc
     if not isinstance(registry, ProviderTrustRegistry):
         raise TrustFactoryError("TRUST_FACTORY_INVALID_RESULT")
@@ -85,6 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         import uvicorn
+
         from .sidecar import SidecarConfigError, create_app
     except ModuleNotFoundError as exc:
         parser.error(
