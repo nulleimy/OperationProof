@@ -9,6 +9,7 @@ from .execution import (
     build_execution_receipt,
     verify_execution_receipt,
 )
+from .subject import OperationSubject, OperationSubjectError
 from .trust import (
     ProviderTrustRegistry,
     TrustVerificationContext,
@@ -23,6 +24,8 @@ __all__ = [
     "ExecutionOutcome",
     "ExecutionReceiptVerificationResult",
     "Layer",
+    "OperationSubject",
+    "OperationSubjectError",
     "ProofDecision",
     "ProviderTrustRegistry",
     "TrustVerificationContext",
