@@ -23,7 +23,7 @@ def _validate_evidence_envelope(
     item: Any,
     *,
     index: int,
-    now: datetime,
+    now: ParsedTimestamp,
 ) -> tuple[str | None, list[str]]:
     if not isinstance(item, dict):
         return None, [f"INVALID_EVIDENCE_ENTRY:{index}"]
@@ -67,8 +67,7 @@ def _validate_evidence_envelope(
         else:
             try:
                 expiry_time = _parse_time(expires_at)
-                now_time = timestamp_from_datetime(now)
-                if compare_timestamps(expiry_time, now_time) <= 0:
+                if compare_timestamps(expiry_time, now) <= 0:
                     reasons.append(f"EXPIRED_EVIDENCE:{layer_name}")
                 if issued_time is not None and compare_timestamps(expiry_time, issued_time) <= 0:
                     reasons.append(f"INVALID_EXPIRY_ORDER:{layer_name}")
@@ -93,10 +92,18 @@ def evaluate_evidence_set(
     reasons: list[str] = []
     seen: set[str] = set()
     forbidden_layers = forbidden_layers or set()
-    now = now or datetime.now(UTC)
+    now_value = now or datetime.now(UTC)
+    try:
+        now_timestamp = timestamp_from_datetime(now_value)
+    except (TypeError, ValueError):
+        return ProofDecision.REJECTED, ["INVALID_VERIFICATION_NOW"]
 
     for index, item in enumerate(evidence):
-        layer, envelope_reasons = _validate_evidence_envelope(item, index=index, now=now)
+        layer, envelope_reasons = _validate_evidence_envelope(
+            item,
+            index=index,
+            now=now_timestamp,
+        )
         reasons.extend(envelope_reasons)
         if not isinstance(item, dict) or layer is None:
             continue
