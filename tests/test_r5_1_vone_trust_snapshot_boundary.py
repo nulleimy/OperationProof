@@ -156,7 +156,7 @@ def _registry(
         grant_verifier=grant_verifier,
         clock=lambda: _NOW,
         consumption_resolver=(
-            (lambda jti: witness if witness is not None and jti == grant["jti"] else None)
+            lambda jti: witness if witness is not None and jti == grant["jti"] else None
         ),
         consumption_verifier=(
             consumption_verifier
