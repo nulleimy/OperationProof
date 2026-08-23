@@ -117,7 +117,10 @@ def verify_protection_document(
                 field="require_last_push_approval",
             ):
                 reasons.append("LAST_PUSH_APPROVAL_POLICY_MISMATCH")
-            if _has_pull_request_bypass(pull_request.get("bypass_pull_request_allowances")):
+            allow_bypass = _require_bool(expected_pr.get("allow_bypass"), field="allow_bypass")
+            if not allow_bypass and _has_pull_request_bypass(
+                pull_request.get("bypass_pull_request_allowances")
+            ):
                 reasons.append("PULL_REQUEST_BYPASS_ALLOWANCE_PRESENT")
 
     booleans = (
