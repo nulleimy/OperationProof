@@ -11,7 +11,11 @@ from operationproof.subject_binding import (
     bind_evidence_to_subject,
     make_subject_bound_trust_verifier,
 )
-from operationproof.trust import ProviderTrustRegistry, verify_proof_trust
+from operationproof.trust import (
+    ProviderTrustRegistry,
+    TrustVerificationContext,
+    verify_proof_trust,
+)
 from operationproof.verifier import verify_proof
 
 NOW = datetime(2026, 8, 23, 19, 45, tzinfo=UTC)
@@ -64,6 +68,17 @@ def subject_binding(
 
 def accepts_binding(binding: object) -> bool:
     return isinstance(binding, dict) and binding.get("schema") == "operationproof.subject-binding.v1"
+
+
+def trust_context(subject: OperationSubject) -> TrustVerificationContext:
+    return TrustVerificationContext(
+        root_phase="PRE",
+        evidence_phase="PRE",
+        operation_id=subject.operation_id,
+        proof_digest=sha256_digest({"proof": "test"}),
+        pre_proof_digest=None,
+        evidence_index=0,
+    )
 
 
 def test_binding_requires_external_attestation_and_exact_native_envelope() -> None:
@@ -119,6 +134,51 @@ def test_untrusted_subject_binding_cannot_relabel_native_evidence() -> None:
         )
 
 
+def test_subject_binding_cannot_predate_native_evidence() -> None:
+    subject = canonical_subject()
+    native = native_evidence(Layer.IDENTITY)
+    binding = subject_binding(native, subject)
+    payload = {key: value for key, value in binding.items() if key != "binding_digest"}
+    payload["issued_at"] = "2026-08-23T19:39:59+00:00"
+    binding = {**payload, "binding_digest": sha256_digest(payload)}
+
+    with pytest.raises(
+        SubjectBindingError,
+        match="SUBJECT_BINDING_PREDATES_NATIVE_EVIDENCE",
+    ):
+        bind_evidence_to_subject(
+            native,
+            subject=subject,
+            binding=binding,
+            binding_verifier=accepts_binding,
+            now=NOW,
+        )
+
+
+def test_binding_callback_cannot_mutate_caller_owned_native_metadata() -> None:
+    subject = canonical_subject()
+    native = native_evidence(Layer.CONTINUITY)
+    original_native = native.to_dict()
+    binding = subject_binding(native, subject)
+
+    def mutating_verifier(candidate: object) -> bool:
+        native.metadata["native_marker"] = "mutated-by-callback"
+        return isinstance(candidate, dict)
+
+    bound = bind_evidence_to_subject(
+        native,
+        subject=subject,
+        binding=binding,
+        binding_verifier=mutating_verifier,
+        now=NOW,
+    )
+
+    assert native.metadata["native_marker"] == "mutated-by-callback"
+    assert bound.metadata["native_marker"] == original_native["metadata"]["native_marker"]
+    marker = bound.metadata["operationproof_subject_binding"]
+    assert marker["native_envelope_digest"] == sha256_digest(original_native)
+
+
 def test_subject_bound_trust_wrapper_reconstructs_exact_native_envelope() -> None:
     subject = canonical_subject()
     native = native_evidence(Layer.AUTHORIZATION)
@@ -143,17 +203,7 @@ def test_subject_bound_trust_wrapper_reconstructs_exact_native_envelope() -> Non
         clock=lambda: NOW,
     )
 
-    from operationproof.trust import TrustVerificationContext
-
-    context = TrustVerificationContext(
-        root_phase="PRE",
-        evidence_phase="PRE",
-        operation_id=subject.operation_id,
-        proof_digest=sha256_digest({"proof": "test"}),
-        pre_proof_digest=None,
-        evidence_index=0,
-    )
-    assert wrapper(bound.to_dict(), context) is True
+    assert wrapper(bound.to_dict(), trust_context(subject)) is True
 
 
 def test_subject_binding_wrapper_rejects_authoritative_binding_drift() -> None:
@@ -177,17 +227,7 @@ def test_subject_binding_wrapper_rejects_authoritative_binding_drift() -> None:
         clock=lambda: NOW,
     )
 
-    from operationproof.trust import TrustVerificationContext
-
-    context = TrustVerificationContext(
-        root_phase="PRE",
-        evidence_phase="PRE",
-        operation_id=subject.operation_id,
-        proof_digest=sha256_digest({"proof": "test"}),
-        pre_proof_digest=None,
-        evidence_index=0,
-    )
-    assert wrapper(bound.to_dict(), context) is False
+    assert wrapper(bound.to_dict(), trust_context(subject)) is False
 
 
 def test_all_layers_can_compose_one_subject_without_weakening_native_trust() -> None:
