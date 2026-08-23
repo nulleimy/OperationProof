@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/subject-binding.v1.schema.json",
+  "title": "OperationProof Subject Binding v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation_id",
+    "layer",
+    "provider",
+    "native_envelope_digest",
+    "native_subject_digest",
+    "canonical_subject_digest",
+    "issued_at",
+    "expires_at",
+    "binding_digest"
+  ],
+  "properties": {
+    "schema": {"const": "operationproof.subject-binding.v1"},
+    "operation_id": {"type": "string", "minLength": 1},
+    "layer": {"type": "string", "minLength": 1},
+    "provider": {"type": "string", "minLength": 1},
+    "native_envelope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "native_subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "canonical_subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "issued_at": {"type": "string", "minLength": 1},
+    "expires_at": {"type": "string", "minLength": 1},
+    "binding_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

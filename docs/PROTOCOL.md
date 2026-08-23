@@ -1,4 +1,4 @@
-# OperationProof Protocol v1
+# OperationProof Protocol
 
 ## Evidence envelope
 
@@ -19,6 +19,55 @@ Canonical fields:
 
 `decision` preserves the provider-native vocabulary. `verdict` is the OperationProof normalization used for composition.
 
+## Proof versions
+
+`operationproof.operation-proof.v1` remains verifiable for backward compatibility. It binds layers to one `operation_id`, but does not establish that every provider means the same actor / intent / target / state subject.
+
+`operationproof.operation-proof.v2` is the canonical R6 subject-bound protocol. New composed proofs should use v2.
+
+## Canonical OperationSubject
+
+A v2 proof embeds one `operationproof.operation-subject.v1`:
+
+```text
+operation_id
+actor_digest
+intent_digest
+target_digest
+state_digest
+```
+
+The four component digests are provider-neutral opaque identities. Provider adapters remain responsible for proving that their native vocabulary maps to those same dimensions.
+
+`subject_digest` is the SHA-256 digest of the exact canonical OperationSubject document. A v2 proof can be `VERIFIED` only when every evidence envelope in scope carries that exact same `subject_digest`.
+
+This prevents evidence composition across different actors, intentions, targets, or pre-operation states even when all provider-local verdicts individually say `PASS`.
+
+## Provider subject correlation
+
+Existing providers may already emit a provider-native `subject_digest` whose vocabulary is narrower or different from the canonical OperationSubject. R6 does **not** permit callers to relabel such evidence by assignment.
+
+`operationproof.subject-binding.v1` is the provider-neutral correlation artifact. It binds:
+
+```text
+operation_id
+layer
+provider
+native_envelope_digest
+native_subject_digest
+canonical_subject_digest
+issued_at
+expires_at
+```
+
+plus its own `binding_digest`.
+
+`bind_evidence_to_subject(...)` accepts the mapping only after an external trusted verifier authenticates the exact binding. The resulting envelope retains the native subject/envelope identities in binding metadata while carrying the canonical subject digest for v2 composition.
+
+At provider-trust time, `make_subject_bound_trust_verifier(...)` reconstructs the exact original native envelope, runs the original provider verifier, independently resolves the subject binding out-of-band, and re-authenticates it. Therefore a proof cannot grant itself subject-correlation authority merely by embedding a matching hash.
+
+This bridge is provider-neutral and can wrap V-One authorization, HOWEDO continuity, CASER execution, or another provider without weakening that provider's existing trust verifier. A deployment must still supply the authoritative subject-binding resolver/verifier.
+
 ## PRE phase
 
 Required layers:
@@ -33,7 +82,9 @@ data_flow
 resource
 ```
 
-A PRE proof is `VERIFIED` only if every required layer is present exactly once, belongs to the same operation, is unexpired, and has normalized verdict `PASS`.
+A v1 PRE proof is `VERIFIED` only if every required layer is present exactly once, belongs to the same operation, is unexpired, and has normalized verdict `PASS`.
+
+A v2 PRE proof additionally requires exact `subject_digest` equality across all seven required layers.
 
 ## FINAL phase
 
@@ -45,9 +96,17 @@ A FINAL proof requires:
 4. execution evidence bound to the same operation;
 5. execution verdict `PASS`.
 
+For v2, FINAL additionally carries the exact same embedded `subject` and `subject_digest` as PRE, and execution evidence must carry that same canonical `subject_digest`.
+
+## Integrity versus semantic decision
+
+A subject mismatch is a semantic rejection, not necessarily a malformed proof. A correctly recorded v2 proof may therefore be integrity-valid while its decision is `REJECTED` with a reason such as `SUBJECT_DIGEST_MISMATCH:intent`.
+
+Tampering with the embedded `subject` or its claimed `subject_digest`, by contrast, is an integrity failure.
+
 ## Canonicalization
 
-R0-R1 uses UTF-8 JSON with sorted keys and compact separators. `proof_digest` is excluded from its own digest input.
+OperationProof uses UTF-8 JSON with sorted keys and compact separators. `proof_digest` is excluded from its own digest input.
 
 Digest format:
 
