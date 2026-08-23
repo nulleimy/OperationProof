@@ -11,6 +11,7 @@ from operationproof.trust import (
     EMBEDDED_PRE_OF_FINAL_STAGE,
     ProviderTrustRegistry,
     TrustVerificationContext,
+    _current_verification_stage,
     verify_proof_trust,
 )
 
@@ -49,7 +50,7 @@ def test_stage_is_callback_scoped_without_changing_legacy_context_fields() -> No
 
     def verifier(_item: object, context: TrustVerificationContext) -> bool:
         observed_contexts.append(context)
-        observed_stages.append((context.root_phase, context.verification_stage))
+        observed_stages.append((context.root_phase, _current_verification_stage()))
         return True
 
     registry = ProviderTrustRegistry()
@@ -62,8 +63,7 @@ def test_stage_is_callback_scoped_without_changing_legacy_context_fields() -> No
     for context in observed_contexts:
         assert tuple(field.name for field in fields(context)) == _CONTEXT_FIELDS
         assert tuple(asdict(context)) == _CONTEXT_FIELDS
-        assert "verification_stage" not in asdict(context)
-        assert context.verification_stage == DIRECT_VERIFICATION_STAGE
+        assert not hasattr(context, "verification_stage")
 
     observed_contexts.clear()
     observed_stages.clear()
@@ -81,11 +81,8 @@ def test_stage_is_callback_scoped_without_changing_legacy_context_fields() -> No
     assert all(context.proof_digest == pre["proof_digest"] for context in embedded_contexts)
     assert all(context.pre_proof_digest is None for context in embedded_contexts)
 
-    # The callback-only stage is reset after each provider verifier invocation.
-    assert all(
-        context.verification_stage == DIRECT_VERIFICATION_STAGE
-        for context in observed_contexts
-    )
+    # Outside a provider callback no post-execution stage remains active.
+    assert _current_verification_stage() == DIRECT_VERIFICATION_STAGE
 
 
 def test_embedded_stage_is_revoked_in_inherited_asyncio_context() -> None:
@@ -100,13 +97,13 @@ def test_embedded_stage_is_revoked_in_inherited_asyncio_context() -> None:
         def verifier(_item: object, context: TrustVerificationContext) -> bool:
             if (
                 context.root_phase == "PRE"
-                and context.verification_stage == EMBEDDED_PRE_OF_FINAL_STAGE
+                and _current_verification_stage() == EMBEDDED_PRE_OF_FINAL_STAGE
                 and not child_tasks
             ):
 
                 async def observe_after_callback() -> None:
                     await asyncio.sleep(0)
-                    child_observed_stages.append(context.verification_stage)
+                    child_observed_stages.append(_current_verification_stage())
 
                 child_tasks.append(asyncio.create_task(observe_after_callback()))
             return True
