@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import importlib
 from collections.abc import Callable, Sequence
-from typing import Any
 
 from .trust import ProviderTrustRegistry
 
