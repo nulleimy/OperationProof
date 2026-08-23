@@ -108,7 +108,8 @@ def test_structurally_valid_forged_evidence_is_rejected_by_provider_trust() -> N
     registry = registry_for(items)
     proof = build_pre_proof("op-1", items)
 
-    proof["evidence"][0]["evidence_digest"] = sha256_digest({"forged": "identity"})
+    identity_item = next(item for item in proof["evidence"] if item["layer"] == "identity")
+    identity_item["evidence_digest"] = sha256_digest({"forged": "identity"})
     proof["proof_digest"] = sha256_digest(
         {key: value for key, value in proof.items() if key != "proof_digest"}
     )
