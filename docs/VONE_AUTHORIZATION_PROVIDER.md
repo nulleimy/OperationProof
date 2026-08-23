@@ -1,14 +1,23 @@
 # V-One authorization provider boundary
 
-OperationProof treats V-One as an external authorization authority. OperationProof does not reimplement V-One policy, approval, capability, revocation, precondition, or grant-consumption logic.
+OperationProof treats V-One as an external authorization authority. OperationProof does not reimplement V-One policy, approval, capability, revocation, precondition, grant-consumption, or dispatch logic.
 
-## Canonical provider artifact
+## Canonical provider artifacts
 
-The R5 adapter consumes V-One `execution-grant/v2` as authorization evidence for one OperationProof PRE operation.
+The authorization envelope is created from V-One `execution-grant/v2` for one OperationProof PRE operation.
 
-`AuthorizationSnapshot` alone is intentionally insufficient for a PASS. V-One documents the snapshot as immutable authorization evidence rather than an irrevocable bearer permission, and authoritative grant issuance re-checks live permission and deny gates. The grant therefore supplies the current, narrowed, short-lived authority artifact.
+`AuthorizationSnapshot` alone is intentionally insufficient for PASS. V-One documents the snapshot as immutable authorization evidence rather than an irrevocable bearer permission, and authoritative grant issuance re-checks live permission and deny gates. The grant therefore supplies the narrowed, short-lived authority artifact.
 
-## Required bindings
+V-One consumes a `ONE_TIME` grant durably in the control plane before Dispatch. Its canonical post-consumption artifact is `grant-consumption-witness/v1`. OperationProof uses that witness only when an already-authorized PRE proof is revalidated as the embedded PRE of a FINAL proof.
+
+These are deliberately different trust questions:
+
+- **DIRECT PRE admission:** is this exact grant authentic, currently inside its issuance window, and still admissible/unused according to authoritative V-One state?
+- **embedded PRE during FINAL verification:** was this exact grant durably consumed for this exact execution while the grant was valid and the V-One live authority/revocation/conformance checks still passed?
+
+A consumption witness never substitutes for unused-grant admission. A consumed grant is not accepted for a new DIRECT PRE operation.
+
+## Grant bindings
 
 The adapter requires:
 
@@ -21,10 +30,10 @@ The adapter requires:
 - canonical UTC millisecond timestamps
 - positive grant TTL no longer than 300 seconds
 - precondition witness no more than 30 seconds before grant issuance
-- grant not expired at verification time
+- DIRECT PRE verification time within `issued_at <= now < expires_at`
 - valid provider-native lowercase 64-hex SHA-256 fields
 - exact recomputation of V-One `grant_digest`
-- an external trusted grant verifier returning true
+- an external trusted admission verifier returning true for DIRECT PRE
 
 The adapter computes an additional OperationProof-local `sha256:` digest over the complete grant document. The V-One native digest remains provider evidence; neither digest is an authenticity root by itself.
 
@@ -40,24 +49,46 @@ The resulting envelope uses:
 
 The subject digest binds the operation to the snapshot, actor, workspace, environment, capability, capability definition, target, and payload. The evidence digest binds the provider, exact OperationProof grant-document digest, and V-One native grant digest.
 
-## Provider trust
+## Trusted verification stage
 
-`make_vone_execution_grant_trust_verifier()` is intended for the R3 `ProviderTrustRegistry`.
+`TrustVerificationContext.verification_stage` is generated internally by OperationProof and is never serialized in a proof.
 
-It fails closed unless:
+- `DIRECT` is used when a PRE proof is verified directly.
+- `EMBEDDED_PRE_OF_FINAL` is used when the exact embedded PRE of a structurally valid FINAL proof is recursively provider-verified.
 
-- verification occurs in PRE root/evidence context
-- `pre_proof_digest` is absent
-- the envelope operation matches the trusted context operation
-- the serialized envelope and metadata use the exact bounded contract
-- the authoritative grant can be re-resolved out of band by its OperationProof document digest
-- the authoritative grant passes structural, freshness, native-digest, and external authority verification again
-- reproducing the authorization envelope from that authoritative grant yields the exact serialized envelope
+The stage marker does **not** replace or alter R3/R3.1 context isolation. Embedded PRE evidence still receives `root_phase=PRE`, `evidence_phase=PRE`, the PRE proof's own digest and operation id, and `pre_proof_digest=None`. An outer FINAL proof therefore cannot launder its digest or phase into PRE provider trust.
 
-Resolver configuration and the external grant verifier are deployment trust roots. They must never be learned from the proof, grant, or envelope.
+## DIRECT PRE provider trust
 
-## External verifier responsibility
+`make_vone_execution_grant_trust_verifier()` re-resolves the exact grant out of band by its OperationProof document digest, reproduces the exact serialized authorization envelope, and invokes `grant_verifier`.
 
-The external V-One grant verifier must authenticate and live-revalidate the provider artifact according to deployment policy. That includes any V-One state not self-authenticating from the serialized grant, such as current revocation/consumption/issuer authority where applicable.
+`grant_verifier` is the deployment's admission authority. For a V-One `ONE_TIME` grant it must fail closed when the grant is already consumed, revoked, invalidated, or otherwise no longer admissible.
 
-OperationProof does not issue, revoke, consume, or refresh V-One grants.
+## Post-execution provider trust
+
+When the same PRE proof is revalidated inside a FINAL proof, the grant may legitimately already be consumed and may have expired after successful consumption. OperationProof therefore does **not** re-run the unused-grant admission check in this stage.
+
+Instead it requires both `consumption_resolver` and `consumption_verifier`. The resolver obtains authoritative V-One `grant-consumption-witness/v1` by grant JTI. The witness must have the exact V-One field contract and bind:
+
+- grant JTI and grant ID
+- native grant digest
+- execution ID / OperationProof operation ID
+- authorization snapshot digest
+- execution capsule digest
+- runner class
+- live revocation epoch equal to the grant epoch
+- V-One conformance and clock witness digests
+- canonical `consumed_at`
+- `sqlite-begin-immediate/v1` serialization contract
+- authority revision
+- exact recomputed native witness digest
+
+OperationProof additionally requires `issued_at <= consumed_at < expires_at` and `consumed_at <= verification time`.
+
+If the consumption resolver/verifier is absent, false, throws, returns the wrong witness, or any binding differs, FINAL provider trust fails closed.
+
+## Trust roots and non-goals
+
+Resolver configuration plus the external admission/consumption verifiers are deployment trust roots. They must never be learned from the proof, grant, envelope, or consumption witness itself.
+
+OperationProof does not issue, revoke, consume, refresh, or dispatch V-One grants. It does not infer a consumption witness from execution success. Serialized OperationProof evidence is never the source of authority.
