@@ -156,9 +156,12 @@ def verify_execution_receipt(
         reasons.append("UNVERIFIED_EXECUTION_OUTCOME_CLAIM")
 
     supplied_digest = receipt.get("receipt_digest")
-    if isinstance(supplied_digest, str) and valid_digest(supplied_digest):
-        if sha256_digest(execution_receipt_payload(receipt)) != supplied_digest:
-            reasons.append("EXECUTION_RECEIPT_DIGEST_MISMATCH")
+    if (
+        isinstance(supplied_digest, str)
+        and valid_digest(supplied_digest)
+        and sha256_digest(execution_receipt_payload(receipt)) != supplied_digest
+    ):
+        reasons.append("EXECUTION_RECEIPT_DIGEST_MISMATCH")
 
     return ExecutionReceiptVerificationResult(
         valid=not reasons,
