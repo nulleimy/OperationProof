@@ -13,9 +13,9 @@ V-One consumes a `ONE_TIME` grant durably in the control plane before Dispatch. 
 These are deliberately different trust questions:
 
 - **DIRECT PRE admission:** is this exact grant authentic, currently inside its issuance window, and still admissible/unused according to authoritative V-One state?
-- **embedded PRE during FINAL verification:** was this exact grant durably consumed for this exact execution while the grant was valid and the V-One live authority/revocation/conformance checks still passed?
+- **embedded PRE during FINAL verification:** was this exact grant durably consumed for this exact execution while the grant remains inside the authorization evidence lifetime?
 
-A consumption witness never substitutes for unused-grant admission. A consumed grant is not accepted for a new DIRECT PRE operation.
+A consumption witness never substitutes for unused-grant admission. A consumed grant is not accepted for a new DIRECT PRE operation. A consumption witness also does not extend the grant or PRE-evidence expiry window.
 
 ## Grant bindings
 
@@ -30,7 +30,7 @@ The adapter requires:
 - canonical UTC millisecond timestamps
 - positive grant TTL no longer than 300 seconds
 - precondition witness no more than 30 seconds before grant issuance
-- DIRECT PRE verification time within `issued_at <= now < expires_at`
+- verification time within `issued_at <= now < expires_at` for both DIRECT PRE and embedded PRE during FINAL provider verification
 - valid provider-native lowercase 64-hex SHA-256 fields
 - exact recomputation of V-One `grant_digest`
 - an external trusted admission verifier returning true for DIRECT PRE
@@ -64,9 +64,9 @@ The stage marker does **not** replace or alter R3/R3.1 context isolation. Embedd
 
 `grant_verifier` is the deployment's admission authority. For a V-One `ONE_TIME` grant it must fail closed when the grant is already consumed, revoked, invalidated, or otherwise no longer admissible.
 
-## Post-execution provider trust
+## Post-consumption provider trust inside FINAL
 
-When the same PRE proof is revalidated inside a FINAL proof, the grant may legitimately already be consumed and may have expired after successful consumption. OperationProof therefore does **not** re-run the unused-grant admission check in this stage.
+When the same PRE proof is revalidated inside a FINAL proof, the grant may legitimately already be consumed. OperationProof therefore does **not** re-run the unused-grant admission check in this stage.
 
 Instead it requires both `consumption_resolver` and `consumption_verifier`. The resolver obtains authoritative V-One `grant-consumption-witness/v1` by grant JTI. The witness must have the exact V-One field contract and bind:
 
@@ -84,6 +84,8 @@ Instead it requires both `consumption_resolver` and `consumption_verifier`. The 
 - exact recomputed native witness digest
 
 OperationProof additionally requires `issued_at <= consumed_at < expires_at` and `consumed_at <= verification time`.
+
+The FINAL verifier still requires the current verification instant to be before `expires_at`. This matches the protocol invariant that the embedded PRE proof must remain structurally valid and its evidence unexpired. Historical verification after expiry would require a separate protocol/versioned archival-proof design; R5.1 does not invent one.
 
 If the consumption resolver/verifier is absent, false, throws, returns the wrong witness, or any binding differs, FINAL provider trust fails closed.
 
