@@ -66,6 +66,12 @@ def native_verification(
         )
     else:
         checks.append({"check": "effect-class", "status": "PASS", "observed": effect})
+    if outcome_verified and outcome is not None:
+        checks.append({"check": "execution-outcome", "status": "PASS", "observed": outcome})
+    if post_state_verified:
+        checks.append(
+            {"check": "provider-post-state", "status": "PASS", "observed": "VERIFIED"}
+        )
 
     verification: dict[str, object] = {
         "schemaVersion": "verification-result/v1",
@@ -222,6 +228,44 @@ def test_verified_failed_outcome_maps_to_fail() -> None:
     execution = adapt(pre, receipt, verification)
     assert execution.verdict == Verdict.FAIL
     assert execution.decision == "EXECUTION_FAILED"
+
+
+def test_outcome_claim_without_independent_check_fails_closed() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+    )
+    verification["checks"] = [
+        item
+        for item in verification["checks"]  # type: ignore[union-attr]
+        if item.get("check") != "execution-outcome"
+    ]
+
+    with pytest.raises(CaserExecutionError, match="CASER_REQUIRED_CHECK_NOT_PASS:execution-outcome"):
+        adapt(pre, receipt, verification)
+
+
+def test_post_state_claim_without_independent_check_fails_closed() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+        effect="MUTATING",
+        post_state_verified=True,
+    )
+    verification["checks"] = [
+        item
+        for item in verification["checks"]  # type: ignore[union-attr]
+        if item.get("check") != "provider-post-state"
+    ]
+
+    with pytest.raises(CaserExecutionError, match="CASER_REQUIRED_CHECK_NOT_PASS:provider-post-state"):
+        adapt(pre, receipt, verification)
 
 
 def test_binding_must_match_exact_pre_proof_digest() -> None:
