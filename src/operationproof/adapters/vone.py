@@ -11,6 +11,7 @@ from ..trust import (
     DIRECT_VERIFICATION_STAGE,
     EMBEDDED_PRE_OF_FINAL_STAGE,
     TrustVerificationContext,
+    _current_verification_stage,
 )
 
 _GRANT_TYPE = "execution-grant/v2"
@@ -523,7 +524,8 @@ def make_vone_execution_grant_trust_verifier(
                 return False
             if context.pre_proof_digest is not None:
                 return False
-            if context.verification_stage not in {
+            verification_stage = _current_verification_stage()
+            if verification_stage not in {
                 DIRECT_VERIFICATION_STAGE,
                 EMBEDDED_PRE_OF_FINAL_STAGE,
             }:
@@ -563,7 +565,7 @@ def make_vone_execution_grant_trust_verifier(
             if authoritative_document_digest != grant_document_digest:
                 return False
 
-            if context.verification_stage == DIRECT_VERIFICATION_STAGE:
+            if verification_stage == DIRECT_VERIFICATION_STAGE:
                 try:
                     trusted = grant_verifier(grant)
                 except Exception:  # noqa: BLE001 - external admission authority must fail closed
