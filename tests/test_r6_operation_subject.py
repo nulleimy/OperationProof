@@ -144,6 +144,40 @@ def test_execution_for_different_subject_cannot_complete_final() -> None:
     assert verify_proof(final).valid is True
 
 
+def test_v1_final_cannot_wrap_v2_pre_to_drop_subject_binding() -> None:
+    operation_subject = subject()
+    pre = build_pre_proof(
+        operation_subject.operation_id,
+        [
+            evidence(layer, operation_subject=operation_subject)
+            for layer in PRE_LAYERS
+        ],
+        subject=operation_subject,
+    )
+    execution = evidence(
+        Layer.EXECUTION,
+        operation_subject=operation_subject,
+        subject_digest=subject("different-subject").digest,
+    )
+    final = {
+        "schema": "operationproof.operation-proof.v1",
+        "phase": "FINAL",
+        "operation_id": operation_subject.operation_id,
+        "decision": "VERIFIED",
+        "reason_codes": [],
+        "pre_proof_digest": pre["proof_digest"],
+        "pre_proof": pre,
+        "evidence": [execution.to_dict()],
+    }
+    final["proof_digest"] = sha256_digest(final)
+
+    result = verify_proof(final)
+
+    assert result.valid is False
+    assert "PRE_PROOF_SCHEMA_MISMATCH" in result.reason_codes
+    assert "DECISION_MISMATCH" not in result.reason_codes
+
+
 def test_tampered_subject_payload_is_integrity_failure() -> None:
     operation_subject = subject()
     proof = build_pre_proof(
