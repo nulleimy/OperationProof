@@ -25,6 +25,11 @@ def _protection() -> dict[str, object]:
             "require_code_owner_reviews": False,
             "required_approving_review_count": 0,
             "require_last_push_approval": False,
+            "bypass_pull_request_allowances": {
+                "users": [],
+                "teams": [],
+                "apps": [],
+            },
         },
         "required_conversation_resolution": {"enabled": True},
         "allow_force_pushes": {"enabled": False},
@@ -53,6 +58,33 @@ def test_missing_or_weakened_controls_fail_closed() -> None:
     assert "FORCE_PUSH_POLICY_MISMATCH" in reasons
     assert "REQUIRED_STATUS_CHECKS_NOT_STRICT" in reasons
     assert "REQUIRED_STATUS_CHECK_MISSING:test (3.13)" in reasons
+
+
+def test_unexpected_required_check_fails_closed() -> None:
+    protection = _protection()
+    protection["required_status_checks"] = {
+        "strict": True,
+        "contexts": ["test (3.12)", "test (3.13)", "obsolete-check"],
+    }
+
+    reasons = verify_protection_document(protection, _policy())
+
+    assert reasons == ("UNEXPECTED_REQUIRED_STATUS_CHECK:obsolete-check",)
+
+
+def test_pull_request_bypass_actor_fails_closed() -> None:
+    protection = _protection()
+    reviews = protection["required_pull_request_reviews"]
+    assert isinstance(reviews, dict)
+    reviews["bypass_pull_request_allowances"] = {
+        "users": [{"login": "bypass-user"}],
+        "teams": [],
+        "apps": [],
+    }
+
+    reasons = verify_protection_document(protection, _policy())
+
+    assert reasons == ("PULL_REQUEST_BYPASS_ALLOWANCE_PRESENT",)
 
 
 def test_check_objects_are_accepted_as_required_contexts() -> None:
@@ -88,7 +120,7 @@ def test_branch_summary_requires_protected_main() -> None:
     assert reasons == ("BRANCH_NOT_PROTECTED", "BRANCH_PROTECTION_NOT_ENABLED")
 
 
-def test_governance_required_checks_match_ci_matrix() -> None:
+def test_governance_required_checks_match_explicit_ci_job_name() -> None:
     policy = _policy()
     checks = policy["required_status_checks"]
     assert isinstance(checks, dict)
@@ -96,4 +128,5 @@ def test_governance_required_checks_match_ci_matrix() -> None:
 
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "jobs:\n  test:" in workflow
+    assert "    name: test (${{ matrix.python-version }})" in workflow
     assert 'python-version: ["3.12", "3.13"]' in workflow
