@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any
 
 from .canonical import sha256_digest, valid_digest
+from .rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
 
 _EXECUTION_RECEIPT_SCHEMA = "operationproof.execution-receipt.v1"
 
@@ -29,14 +30,8 @@ class ExecutionReceiptVerificationResult:
     reason_codes: tuple[str, ...]
 
 
-def _parse_time(value: Any) -> datetime:
-    if not isinstance(value, str) or not value:
-        raise ValueError("timestamp required")
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
-    parsed = datetime.fromisoformat(normalized)
-    if parsed.tzinfo is None:
-        raise ValueError("timestamp must include timezone")
-    return parsed.astimezone(UTC)
+def _parse_time(value: Any) -> ParsedTimestamp:
+    return parse_rfc3339(value)
 
 
 def execution_receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
@@ -97,6 +92,11 @@ def verify_execution_receipt(
 ) -> ExecutionReceiptVerificationResult:
     reasons: list[str] = []
     now = now or datetime.now(UTC)
+    try:
+        now_timestamp = timestamp_from_datetime(now)
+    except ValueError:
+        now_timestamp = timestamp_from_datetime(datetime.now(UTC))
+        reasons.append("INVALID_EXECUTION_RECEIPT_NOW")
 
     if receipt.get("schema") != _EXECUTION_RECEIPT_SCHEMA:
         reasons.append("UNSUPPORTED_EXECUTION_RECEIPT_SCHEMA")
@@ -129,7 +129,7 @@ def verify_execution_receipt(
         if not isinstance(receipt.get(field_name), bool):
             reasons.append(f"INVALID_EXECUTION_RECEIPT_BOOLEAN:{field_name}")
 
-    issued: datetime | None = None
+    issued: ParsedTimestamp | None = None
     try:
         issued = _parse_time(receipt.get("issued_at"))
     except (TypeError, ValueError):
@@ -139,9 +139,9 @@ def verify_execution_receipt(
     if expires_at is not None:
         try:
             expires = _parse_time(expires_at)
-            if expires <= now:
+            if compare_timestamps(expires, now_timestamp) <= 0:
                 reasons.append("EXPIRED_EXECUTION_RECEIPT")
-            if issued is not None and expires <= issued:
+            if issued is not None and compare_timestamps(expires, issued) <= 0:
                 reasons.append("INVALID_EXECUTION_RECEIPT_EXPIRY_ORDER")
         except (TypeError, ValueError):
             reasons.append("INVALID_EXECUTION_RECEIPT_EXPIRES_AT")
