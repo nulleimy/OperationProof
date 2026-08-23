@@ -3,24 +3,12 @@ from __future__ import annotations
 import json
 
 import operationproof
-
-from operationproof.builder import build_pre_proof
 from operationproof.canonical import sha256_digest
-from operationproof.domain import PRE_LAYERS, EvidenceEnvelope, Verdict
-from operationproof.sdk import (
-    SDK_CONTRACT,
-    ProofDocumentError,
-    assess_proof,
-    assess_proof_json,
-    canonical_proof_json,
-    parse_proof_json,
-)
-from operationproof.subject import OperationSubject
-from operationproof.trust import ProviderTrustRegistry
+from operationproof.domain import PRE_LAYERS
 
 
-def subject() -> OperationSubject:
-    return OperationSubject(
+def subject() -> operationproof.OperationSubject:
+    return operationproof.OperationSubject(
         operation_id="op-r7",
         actor_digest=sha256_digest({"actor": "sdk-user"}),
         intent_digest=sha256_digest({"intent": "verify"}),
@@ -32,12 +20,16 @@ def subject() -> OperationSubject:
 def proof(*, unknown_layer: str | None = None) -> dict[str, object]:
     operation_subject = subject()
     evidence = [
-        EvidenceEnvelope(
+        operationproof.EvidenceEnvelope(
             layer=layer,
             provider=f"sdk:{layer.value}",
             operation_id=operation_subject.operation_id,
             decision="native-ok",
-            verdict=Verdict.UNKNOWN if layer.value == unknown_layer else Verdict.PASS,
+            verdict=(
+                operationproof.Verdict.UNKNOWN
+                if layer.value == unknown_layer
+                else operationproof.Verdict.PASS
+            ),
             subject_digest=operation_subject.digest,
             evidence_digest=sha256_digest({"evidence": layer.value}),
             issued_at="2026-08-23T20:00:00+00:00",
@@ -45,18 +37,23 @@ def proof(*, unknown_layer: str | None = None) -> dict[str, object]:
         )
         for layer in PRE_LAYERS
     ]
-    return build_pre_proof(
+    return operationproof.build_pre_proof(
         operation_subject.operation_id,
         evidence,
         subject=operation_subject,
     )
 
 
-def registry(*, mutate: bool = False) -> ProviderTrustRegistry:
-    result = ProviderTrustRegistry()
+def registry(*, mutate: bool = False) -> operationproof.ProviderTrustRegistry:
+    result = operationproof.ProviderTrustRegistry()
 
     for layer in PRE_LAYERS:
-        def verifier(envelope: object, context: object, *, mutate_item: bool = mutate) -> bool:
+        def verifier(
+            envelope: object,
+            _context: object,
+            *,
+            mutate_item: bool = mutate,
+        ) -> bool:
             if not isinstance(envelope, dict):
                 return False
             if mutate_item:
@@ -74,8 +71,9 @@ def registry(*, mutate: bool = False) -> ProviderTrustRegistry:
 
 
 def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
-    assert SDK_CONTRACT == "operationproof.sdk.v1"
+    assert operationproof.SDK_CONTRACT == "operationproof.sdk.v1"
     assert operationproof.__all__ == [
+        "SDK_CONTRACT",
         "EvidenceEnvelope",
         "ExecutionEffect",
         "ExecutionOutcome",
@@ -87,7 +85,6 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
         "ProofDecision",
         "ProofDocumentError",
         "ProviderTrustRegistry",
-        "SDK_CONTRACT",
         "SubjectBindingError",
         "TrustVerificationContext",
         "TrustVerificationResult",
@@ -109,7 +106,7 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
 
 
 def test_verified_integrity_without_trust_is_never_accepted() -> None:
-    assessment = assess_proof(proof())
+    assessment = operationproof.assess_proof(proof())
 
     assert assessment.integrity_valid is True
     assert assessment.decision == "VERIFIED"
@@ -121,7 +118,7 @@ def test_verified_integrity_without_trust_is_never_accepted() -> None:
 
 
 def test_verified_and_trusted_proof_is_accepted() -> None:
-    assessment = assess_proof(proof(), registry=registry())
+    assessment = operationproof.assess_proof(proof(), registry=registry())
 
     assert assessment.integrity_valid is True
     assert assessment.decision == "VERIFIED"
@@ -132,7 +129,10 @@ def test_verified_and_trusted_proof_is_accepted() -> None:
 
 
 def test_semantically_rejected_proof_is_never_accepted() -> None:
-    assessment = assess_proof(proof(unknown_layer="intent"), registry=registry())
+    assessment = operationproof.assess_proof(
+        proof(unknown_layer="intent"),
+        registry=registry(),
+    )
 
     assert assessment.integrity_valid is True
     assert assessment.decision == "REJECTED"
@@ -142,7 +142,10 @@ def test_semantically_rejected_proof_is_never_accepted() -> None:
 
 
 def test_invalid_registry_fails_closed_without_raising() -> None:
-    assessment = assess_proof(proof(), registry=object())  # type: ignore[arg-type]
+    assessment = operationproof.assess_proof(
+        proof(),
+        registry=object(),  # type: ignore[arg-type]
+    )
 
     assert assessment.integrity_valid is True
     assert assessment.trust_evaluated is False
@@ -152,9 +155,12 @@ def test_invalid_registry_fails_closed_without_raising() -> None:
 
 def test_assessment_detaches_provider_callbacks_from_caller_owned_proof() -> None:
     caller_proof = proof()
-    before = json.loads(canonical_proof_json(caller_proof))
+    before = json.loads(operationproof.canonical_proof_json(caller_proof))
 
-    assessment = assess_proof(caller_proof, registry=registry(mutate=True))
+    assessment = operationproof.assess_proof(
+        caller_proof,
+        registry=registry(mutate=True),
+    )
 
     assert assessment.accepted is True
     assert caller_proof == before
@@ -163,7 +169,7 @@ def test_assessment_detaches_provider_callbacks_from_caller_owned_proof() -> Non
 def test_strict_parser_rejects_duplicate_keys() -> None:
     raw = '{"schema":"operationproof.operation-proof.v1","schema":"other"}'
 
-    assessment = assess_proof_json(raw)
+    assessment = operationproof.assess_proof_json(raw)
 
     assert assessment.integrity_valid is False
     assert assessment.accepted is False
@@ -171,7 +177,7 @@ def test_strict_parser_rejects_duplicate_keys() -> None:
 
 
 def test_strict_parser_rejects_non_finite_json_numbers() -> None:
-    assessment = assess_proof_json('{"value":NaN}')
+    assessment = operationproof.assess_proof_json('{"value":NaN}')
 
     assert assessment.integrity_valid is False
     assert assessment.sdk_reason_codes == ("NON_FINITE_JSON_NUMBER:NaN",)
@@ -179,8 +185,8 @@ def test_strict_parser_rejects_non_finite_json_numbers() -> None:
 
 def test_parse_proof_json_requires_top_level_object() -> None:
     try:
-        parse_proof_json("[]")
-    except ProofDocumentError as exc:
+        operationproof.parse_proof_json("[]")
+    except operationproof.ProofDocumentError as exc:
         assert str(exc) == "PROOF_DOCUMENT_MUST_BE_OBJECT"
     else:
         raise AssertionError("expected ProofDocumentError")
@@ -188,8 +194,8 @@ def test_parse_proof_json_requires_top_level_object() -> None:
 
 def test_canonical_proof_json_is_deterministic_and_round_trips() -> None:
     original = proof()
-    canonical = canonical_proof_json(original)
-    parsed = parse_proof_json(canonical)
+    canonical = operationproof.canonical_proof_json(original)
+    parsed = operationproof.parse_proof_json(canonical)
 
-    assert canonical == canonical_proof_json(parsed)
+    assert canonical == operationproof.canonical_proof_json(parsed)
     assert parsed == original
