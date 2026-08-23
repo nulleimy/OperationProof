@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from ..canonical import sha256_digest, valid_digest
+from ..canonical import canonical_json_bytes, sha256_digest, valid_digest
 from ..domain import EvidenceEnvelope, Layer, Verdict
 from ..execution import ExecutionEffect, ExecutionOutcome, build_execution_receipt
 from ..rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
@@ -32,6 +33,24 @@ def _parse_timestamp(value: Any, code: str) -> ParsedTimestamp:
         return parse_rfc3339(value)
     except ValueError as exc:
         raise CaserExecutionError(code) from exc
+
+
+def _snapshot_document(document: Mapping[str, Any], code: str) -> dict[str, Any]:
+    """Deep-copy a JSON evidence document into an adapter-owned snapshot.
+
+    Native evidence objects are caller-owned and may be mutable. The adapter must not
+    consume data that can change while an external trust callback is running. A
+    canonical JSON round-trip gives us a detached plain-Python snapshot and rejects
+    non-JSON values fail-closed.
+    """
+
+    try:
+        snapshot = json.loads(canonical_json_bytes(dict(document)).decode("utf-8"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise CaserExecutionError(code) from exc
+    if not isinstance(snapshot, dict):
+        raise CaserExecutionError(code)
+    return snapshot
 
 
 def _document_digest(document: Mapping[str, Any]) -> str:
@@ -240,6 +259,15 @@ class CaserExecutionAdapter:
 
         if not isinstance(receipt, Mapping):
             raise CaserExecutionError("INVALID_CASER_RECEIPT")
+        if not isinstance(verification, Mapping):
+            raise CaserExecutionError("INVALID_CASER_VERIFICATION")
+        if not isinstance(binding, Mapping):
+            raise CaserExecutionError("INVALID_CASER_EXECUTION_BINDING")
+
+        receipt = _snapshot_document(receipt, "INVALID_CASER_RECEIPT")
+        verification = _snapshot_document(verification, "INVALID_CASER_VERIFICATION")
+        binding = _snapshot_document(binding, "INVALID_CASER_EXECUTION_BINDING")
+
         if receipt.get("schemaVersion") != _CASER_RECEIPT_SCHEMA:
             raise CaserExecutionError("INVALID_CASER_RECEIPT_SCHEMA")
         if receipt.get("operationId") != operation_id:
@@ -252,8 +280,6 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("INVALID_CASER_RECEIPT_CONTENT_IDENTITY")
         receipt_document_digest = _document_digest(receipt)
 
-        if not isinstance(verification, Mapping):
-            raise CaserExecutionError("INVALID_CASER_VERIFICATION")
         if verification.get("schemaVersion") != _CASER_VERIFICATION_SCHEMA:
             raise CaserExecutionError("INVALID_CASER_VERIFICATION_SCHEMA")
         for field_name in (
@@ -306,8 +332,6 @@ class CaserExecutionAdapter:
 
         integrity_verified, outcome_verified, post_state_claim = _claims(verification)
 
-        if not isinstance(binding, Mapping):
-            raise CaserExecutionError("INVALID_CASER_EXECUTION_BINDING")
         if not callable(binding_verifier):
             raise CaserExecutionError("INVALID_CASER_BINDING_VERIFIER")
         if binding.get("schema") != _BINDING_SCHEMA:
@@ -343,8 +367,9 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("CASER_BINDING_DIGEST_MISMATCH")
 
         try:
-            trusted_binding = binding_verifier(binding)
-        except Exception as exc:
+            verifier_binding = _snapshot_document(binding, "INVALID_CASER_EXECUTION_BINDING")
+            trusted_binding = binding_verifier(verifier_binding)
+        except Exception as exc:  # noqa: BLE001 - provider boundary must fail closed
             raise CaserExecutionError("CASER_BINDING_VERIFICATION_ERROR") from exc
         if trusted_binding is not True:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
