@@ -44,6 +44,8 @@ R2 adds the first real provider adapter: HOWEDO continuity evidence with a trust
 
 R3 adds the provider trust gate: a fail-closed `(layer, provider)` registry and `verify_proof_trust()` so serialized evidence cannot become authoritative merely by claiming a provider name and recomputing local digests.
 
+R4 adds `operationproof.execution-receipt.v1` and the first execution provider adapter for CASER/SandCloud. It consumes the existing CASER `execution-receipt/v1` plus independent `verification-result/v1`, binds them to the exact PRE proof, and deliberately keeps integrity-only V2 evidence at `UNKNOWN` rather than promoting it to execution success.
+
 ## Local verification
 
 ```bash

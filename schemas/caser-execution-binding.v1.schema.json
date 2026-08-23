@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/caser-execution-binding.v1.schema.json",
+  "title": "OperationProof CASER Execution Binding v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema",
+    "operation_id",
+    "pre_proof_digest",
+    "receipt_content_identity",
+    "verification_content_identity",
+    "receipt_document_digest",
+    "verification_document_digest",
+    "execution_instance_id",
+    "issued_at",
+    "expires_at",
+    "binding_digest"
+  ],
+  "properties": {
+    "schema": {"const": "operationproof.caser-execution-binding.v1"},
+    "operation_id": {"type": "string", "minLength": 1},
+    "pre_proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "receipt_content_identity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "verification_content_identity": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "receipt_document_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "verification_document_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "execution_instance_id": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "binding_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

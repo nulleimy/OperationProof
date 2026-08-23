@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/execution-receipt.v1.schema.json",
+  "title": "OperationProof Execution Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "provider",
+    "operation_id",
+    "pre_proof_digest",
+    "execution_instance_id",
+    "effect_class",
+    "outcome",
+    "native_receipt_digest",
+    "native_verification_digest",
+    "receipt_integrity_verified",
+    "execution_outcome_verified",
+    "provider_post_state_verified",
+    "issued_at",
+    "expires_at",
+    "metadata",
+    "receipt_digest"
+  ],
+  "properties": {
+    "schema": {"const": "operationproof.execution-receipt.v1"},
+    "provider": {"type": "string", "minLength": 1},
+    "operation_id": {"type": "string", "minLength": 1},
+    "pre_proof_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "execution_instance_id": {"type": "string", "minLength": 1},
+    "effect_class": {"enum": ["READ_ONLY", "MUTATING", "UNKNOWN"]},
+    "outcome": {"enum": ["SUCCEEDED", "FAILED", "UNKNOWN"]},
+    "native_receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "native_verification_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "receipt_integrity_verified": {"type": "boolean"},
+    "execution_outcome_verified": {"type": "boolean"},
+    "provider_post_state_verified": {"type": "boolean"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"},
+    "metadata": {"type": "object"},
+    "receipt_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
