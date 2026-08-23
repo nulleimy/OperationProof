@@ -559,7 +559,7 @@ def make_vone_execution_grant_trust_verifier(
             if context.verification_stage == DIRECT_VERIFICATION_STAGE:
                 try:
                     trusted = grant_verifier(grant)
-                except Exception:
+                except Exception:  # noqa: BLE001 - external admission authority must fail closed
                     return False
                 if trusted is not True:
                     return False
@@ -579,7 +579,7 @@ def make_vone_execution_grant_trust_verifier(
                 )
                 try:
                     consumption_trusted = consumption_verifier(witness)
-                except Exception:
+                except Exception:  # noqa: BLE001 - external witness authority must fail closed
                     return False
                 if consumption_trusted is not True:
                     return False
