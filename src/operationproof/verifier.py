@@ -7,8 +7,9 @@ from typing import Any
 from .canonical import proof_payload, sha256_digest, valid_digest
 from .domain import PRE_LAYERS, Layer, ProofDecision
 from .rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
+from .subject import OperationSubject, OperationSubjectError
 
-_PROOF_FIELDS = frozenset(
+_PROOF_FIELDS_V1 = frozenset(
     {
         "schema",
         "phase",
@@ -21,6 +22,7 @@ _PROOF_FIELDS = frozenset(
         "proof_digest",
     }
 )
+_PROOF_FIELDS_V2 = _PROOF_FIELDS_V1 | frozenset({"subject", "subject_digest"})
 _EVIDENCE_FIELDS = frozenset(
     {
         "schema",
@@ -129,6 +131,7 @@ def evaluate_evidence_set(
     required_layers: set[str],
     forbidden_layers: set[str] | None = None,
     allowed_layers: set[str] | None = None,
+    expected_subject_digest: str | None = None,
     now: datetime | None = None,
 ) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
@@ -139,6 +142,9 @@ def evaluate_evidence_set(
         now_timestamp = timestamp_from_datetime(now_value)
     except (TypeError, ValueError):
         return ProofDecision.REJECTED, ["INVALID_VERIFICATION_NOW"]
+
+    if expected_subject_digest is not None and not valid_digest(expected_subject_digest):
+        reasons.append("INVALID_EXPECTED_SUBJECT_DIGEST")
 
     for index, item in enumerate(evidence):
         layer, envelope_reasons = _validate_evidence_envelope(
@@ -160,6 +166,11 @@ def evaluate_evidence_set(
             reasons.append(f"UNEXPECTED_LAYER:{layer}")
         if item.get("operation_id") != operation_id:
             reasons.append(f"OPERATION_ID_MISMATCH:{layer}")
+        if (
+            expected_subject_digest is not None
+            and item.get("subject_digest") != expected_subject_digest
+        ):
+            reasons.append(f"SUBJECT_DIGEST_MISMATCH:{layer}")
         if item.get("verdict") == "FAIL":
             reasons.append(f"LAYER_FAIL:{layer}")
         elif item.get("verdict") != "PASS":
@@ -175,6 +186,8 @@ def evaluate_evidence_set(
 def evaluate_pre_semantics(
     operation_id: str,
     evidence: list[Any],
+    *,
+    expected_subject_digest: str | None = None,
 ) -> tuple[ProofDecision, list[str]]:
     return evaluate_evidence_set(
         operation_id=operation_id,
@@ -182,6 +195,7 @@ def evaluate_pre_semantics(
         required_layers={layer.value for layer in PRE_LAYERS},
         forbidden_layers={Layer.EXECUTION.value},
         allowed_layers={layer.value for layer in PRE_LAYERS},
+        expected_subject_digest=expected_subject_digest,
     )
 
 
@@ -192,6 +206,7 @@ def _evaluate_final_semantics(
     pre_digest: Any,
     evidence: list[Any],
     pre_result: VerificationResult | None,
+    expected_subject_digest: str | None = None,
 ) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
 
@@ -211,6 +226,11 @@ def _evaluate_final_semantics(
             reasons.append("PRE_PROOF_OPERATION_ID_MISMATCH")
         if pre_proof.get("proof_digest") != pre_digest:
             reasons.append("PRE_PROOF_DIGEST_MISMATCH")
+        if expected_subject_digest is not None:
+            if pre_proof.get("schema") != "operationproof.operation-proof.v2":
+                reasons.append("PRE_PROOF_SUBJECT_BINDING_MISSING")
+            elif pre_proof.get("subject_digest") != expected_subject_digest:
+                reasons.append("PRE_PROOF_SUBJECT_DIGEST_MISMATCH")
 
     if not valid_digest(str(pre_digest or "")):
         reasons.append("INVALID_PRE_PROOF_DIGEST")
@@ -221,6 +241,7 @@ def _evaluate_final_semantics(
             evidence=evidence,
             required_layers={Layer.EXECUTION.value},
             allowed_layers={Layer.EXECUTION.value},
+            expected_subject_digest=expected_subject_digest,
         )
         reasons.extend(execution_reasons)
 
@@ -235,6 +256,7 @@ def evaluate_final_semantics(
     pre_proof: Any,
     pre_digest: Any,
     evidence: list[Any],
+    expected_subject_digest: str | None = None,
 ) -> tuple[ProofDecision, list[str]]:
     pre_result = verify_proof(pre_proof) if isinstance(pre_proof, dict) else None
     return _evaluate_final_semantics(
@@ -243,6 +265,7 @@ def evaluate_final_semantics(
         pre_digest=pre_digest,
         evidence=evidence,
         pre_result=pre_result,
+        expected_subject_digest=expected_subject_digest,
     )
 
 
@@ -262,10 +285,40 @@ def _record_matches(
     return integrity
 
 
+def _verify_subject_binding(
+    proof: dict[str, Any],
+    *,
+    operation_id: Any,
+) -> tuple[str | None, list[str]]:
+    integrity: list[str] = []
+    raw_subject = proof.get("subject")
+    if not isinstance(raw_subject, dict):
+        return None, ["INVALID_OPERATION_SUBJECT"]
+
+    try:
+        subject = OperationSubject.from_dict(raw_subject)
+    except OperationSubjectError:
+        return None, ["INVALID_OPERATION_SUBJECT"]
+
+    if subject.operation_id != operation_id:
+        integrity.append("SUBJECT_OPERATION_ID_MISMATCH")
+
+    supplied_digest = proof.get("subject_digest")
+    if not isinstance(supplied_digest, str) or not valid_digest(supplied_digest):
+        integrity.append("INVALID_OPERATION_SUBJECT_DIGEST")
+        return None, integrity
+    if subject.digest != supplied_digest:
+        integrity.append("OPERATION_SUBJECT_DIGEST_MISMATCH")
+
+    return supplied_digest, integrity
+
+
 def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     integrity: list[str] = []
 
-    unexpected_fields = sorted(set(proof) - _PROOF_FIELDS)
+    schema = proof.get("schema")
+    allowed_fields = _PROOF_FIELDS_V2 if schema == "operationproof.operation-proof.v2" else _PROOF_FIELDS_V1
+    unexpected_fields = sorted(set(proof) - allowed_fields)
     if unexpected_fields:
         integrity.append("UNEXPECTED_PROOF_FIELDS:" + ",".join(unexpected_fields))
 
@@ -275,13 +328,24 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     elif sha256_digest(proof_payload(proof)) != supplied_digest:
         integrity.append("PROOF_DIGEST_MISMATCH")
 
-    if proof.get("schema") != "operationproof.operation-proof.v1":
+    if schema not in {
+        "operationproof.operation-proof.v1",
+        "operationproof.operation-proof.v2",
+    }:
         integrity.append("UNSUPPORTED_SCHEMA")
 
     phase = proof.get("phase")
     operation_id = proof.get("operation_id")
     if not isinstance(operation_id, str) or not operation_id:
         integrity.append("INVALID_OPERATION_ID")
+
+    expected_subject_digest: str | None = None
+    if schema == "operationproof.operation-proof.v2":
+        expected_subject_digest, subject_integrity = _verify_subject_binding(
+            proof,
+            operation_id=operation_id,
+        )
+        integrity.extend(subject_integrity)
 
     evidence = proof.get("evidence")
     if not isinstance(evidence, list):
@@ -300,7 +364,11 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
             integrity.append("PRE_PROOF_FIELD_FORBIDDEN")
         if "pre_proof_digest" in proof:
             integrity.append("PRE_PROOF_DIGEST_FIELD_FORBIDDEN")
-        decision, semantic_reasons = evaluate_pre_semantics(operation_id, evidence)
+        decision, semantic_reasons = evaluate_pre_semantics(
+            operation_id,
+            evidence,
+            expected_subject_digest=expected_subject_digest,
+        )
         expected_decision = decision.value
     elif phase == "FINAL":
         pre_proof = proof.get("pre_proof")
@@ -310,12 +378,20 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
             integrity.extend(
                 f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
             )
+        if schema == "operationproof.operation-proof.v2" and isinstance(pre_proof, dict):
+            if pre_proof.get("schema") != schema:
+                integrity.append("PRE_PROOF_SCHEMA_MISMATCH")
+            if pre_proof.get("subject") != proof.get("subject"):
+                integrity.append("PRE_PROOF_SUBJECT_MISMATCH")
+            if pre_proof.get("subject_digest") != proof.get("subject_digest"):
+                integrity.append("PRE_PROOF_SUBJECT_DIGEST_MISMATCH")
         decision, semantic_reasons = _evaluate_final_semantics(
             operation_id=operation_id,
             pre_proof=pre_proof,
             pre_digest=proof.get("pre_proof_digest"),
             evidence=evidence,
             pre_result=pre_integrity,
+            expected_subject_digest=expected_subject_digest,
         )
         expected_decision = decision.value
     else:
