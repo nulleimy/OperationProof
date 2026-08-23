@@ -7,6 +7,7 @@ from typing import Any
 from ..canonical import sha256_digest, valid_digest
 from ..domain import EvidenceEnvelope, Layer, Verdict
 from ..execution import ExecutionEffect, ExecutionOutcome, build_execution_receipt
+from ..rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
 from ..verifier import verify_proof
 
 _CASER_RECEIPT_SCHEMA = "execution-receipt/v1"
@@ -25,17 +26,11 @@ class CaserExecutionError(ValueError):
 BindingVerifier = Callable[[Mapping[str, Any]], bool]
 
 
-def _parse_timestamp(value: Any, code: str) -> datetime:
-    if not isinstance(value, str) or not value:
-        raise CaserExecutionError(code)
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+def _parse_timestamp(value: Any, code: str) -> ParsedTimestamp:
     try:
-        parsed = datetime.fromisoformat(normalized)
+        return parse_rfc3339(value)
     except ValueError as exc:
         raise CaserExecutionError(code) from exc
-    if parsed.tzinfo is None:
-        raise CaserExecutionError(code)
-    return parsed.astimezone(UTC)
 
 
 def _document_digest(document: Mapping[str, Any]) -> str:
@@ -315,11 +310,11 @@ class CaserExecutionAdapter:
         expires_at = binding.get("expires_at")
         issued = _parse_timestamp(issued_at, "INVALID_CASER_BINDING_ISSUED_AT")
         expires = _parse_timestamp(expires_at, "INVALID_CASER_BINDING_EXPIRES_AT")
-        if issued < verified_at:
+        if compare_timestamps(issued, verified_at) < 0:
             raise CaserExecutionError("CASER_BINDING_PREDATES_VERIFICATION")
-        if expires <= issued:
+        if compare_timestamps(expires, issued) <= 0:
             raise CaserExecutionError("INVALID_CASER_BINDING_TIME_WINDOW")
-        if expires <= datetime.now(UTC):
+        if compare_timestamps(expires, timestamp_from_datetime(datetime.now(UTC))) <= 0:
             raise CaserExecutionError("EXPIRED_CASER_EXECUTION_BINDING")
 
         binding_digest = binding.get("binding_digest")
