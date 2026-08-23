@@ -16,9 +16,20 @@ Repository = "https://github.com/nulleimy/OperationProof"
 
 [project.scripts]
 operationproof-verify = "operationproof.cli:main"
+operationproof-sidecar = "operationproof.sidecar_runtime:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.9"]
+sidecar = [
+    "fastapi>=0.141.1,<0.142",
+    "uvicorn>=0.52.3,<0.53",
+]
+dev = [
+    "pytest>=8",
+    "ruff>=0.9",
+    "fastapi>=0.141.1,<0.142",
+    "uvicorn>=0.52.3,<0.53",
+    "httpx==0.28.1",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
