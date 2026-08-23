@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -9,16 +10,20 @@ from .verifier import verify_proof
 
 DIRECT_VERIFICATION_STAGE: Final = "DIRECT"
 EMBEDDED_PRE_OF_FINAL_STAGE: Final = "EMBEDDED_PRE_OF_FINAL"
+_VERIFICATION_STAGE: ContextVar[str] = ContextVar(
+    "operationproof_trust_verification_stage",
+    default=DIRECT_VERIFICATION_STAGE,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class TrustVerificationContext:
     """Trusted context derived from one structurally verified proof scope.
 
-    ``verification_stage`` is generated only by OperationProof's verifier. It is not
-    serialized in a proof and therefore cannot be selected by an untrusted sender.
-    Root/evidence phase semantics remain unchanged: embedded PRE evidence is still
-    verified against the PRE proof's own digest and operation context.
+    The dataclass field contract intentionally remains the original six-field R3
+    contract. ``verification_stage`` is an ephemeral callback-time property backed
+    by a private ContextVar, so legacy equality/hash/serialization behavior is not
+    changed for non-stage-aware providers.
     """
 
     root_phase: str
@@ -27,7 +32,12 @@ class TrustVerificationContext:
     proof_digest: str
     pre_proof_digest: str | None
     evidence_index: int
-    verification_stage: str = DIRECT_VERIFICATION_STAGE
+
+    @property
+    def verification_stage(self) -> str:
+        """Return the trusted internal stage only while a verifier callback runs."""
+
+        return _VERIFICATION_STAGE.get()
 
 
 EvidenceTrustVerifier = Callable[[Mapping[str, Any], TrustVerificationContext], bool]
@@ -85,6 +95,7 @@ def _verify_evidence_trust(
     *,
     context: TrustVerificationContext,
     registry: ProviderTrustRegistry,
+    verification_stage: str,
 ) -> list[str]:
     if not isinstance(item, Mapping):
         return [f"INVALID_TRUST_EVIDENCE_ENTRY:{context.evidence_index}"]
@@ -100,10 +111,13 @@ def _verify_evidence_trust(
     if verifier is None:
         return [f"UNREGISTERED_PROVIDER:{layer}:{provider}"]
 
+    token = _VERIFICATION_STAGE.set(verification_stage)
     try:
         trusted = verifier(item, context)
     except Exception:  # noqa: BLE001 - external verifier boundary must fail closed
         return [f"PROVIDER_TRUST_VERIFIER_ERROR:{layer}:{provider}"]
+    finally:
+        _VERIFICATION_STAGE.reset(token)
 
     if trusted is not True:
         return [f"UNTRUSTED_PROVIDER_EVIDENCE:{layer}:{provider}"]
@@ -163,10 +177,14 @@ def _verify_proof_trust_at_stage(
                 proof_digest=proof_digest,
                 pre_proof_digest=pre_proof_digest,
                 evidence_index=index,
-                verification_stage=verification_stage,
             )
             reasons.extend(
-                _verify_evidence_trust(item, context=context, registry=registry)
+                _verify_evidence_trust(
+                    item,
+                    context=context,
+                    registry=registry,
+                    verification_stage=verification_stage,
+                )
             )
 
     return TrustVerificationResult(
@@ -183,10 +201,10 @@ def verify_proof_trust(
 
     PRE evidence is always verified in the PRE proof's own trusted context. FINAL
     verification recursively verifies the exact embedded PRE proof with a trusted
-    post-execution stage marker while retaining that PRE proof's own phase, digest,
-    operation id, and absent ``pre_proof_digest``. This prevents FINAL context
-    laundering while allowing stateful providers to distinguish initial admission
-    from post-execution evidence revalidation.
+    callback-time post-execution stage while retaining that PRE proof's own phase,
+    digest, operation id, and absent ``pre_proof_digest``. The stage is not a
+    serialized/dataclass field, preventing both proof-controlled stage laundering and
+    compatibility drift for existing ProviderTrustRegistry users.
     """
 
     return _verify_proof_trust_at_stage(
