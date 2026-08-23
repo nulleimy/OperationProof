@@ -7,6 +7,35 @@ from typing import Any
 from .canonical import proof_payload, sha256_digest, valid_digest
 from .domain import PRE_LAYERS, Layer, ProofDecision
 
+_PROOF_FIELDS = frozenset(
+    {
+        "schema",
+        "phase",
+        "operation_id",
+        "decision",
+        "reason_codes",
+        "pre_proof_digest",
+        "pre_proof",
+        "evidence",
+        "proof_digest",
+    }
+)
+_EVIDENCE_FIELDS = frozenset(
+    {
+        "schema",
+        "layer",
+        "provider",
+        "operation_id",
+        "decision",
+        "verdict",
+        "subject_digest",
+        "evidence_digest",
+        "issued_at",
+        "expires_at",
+        "metadata",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class VerificationResult:
@@ -34,6 +63,12 @@ def _validate_evidence_envelope(
     reasons: list[str] = []
     layer = item.get("layer")
     layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
+
+    unexpected_fields = sorted(set(item) - _EVIDENCE_FIELDS)
+    if unexpected_fields:
+        reasons.append(
+            f"UNEXPECTED_EVIDENCE_FIELDS:{layer_name}:" + ",".join(unexpected_fields)
+        )
 
     if item.get("schema") != "operationproof.evidence-envelope.v1":
         reasons.append(f"UNSUPPORTED_EVIDENCE_SCHEMA:{layer_name}")
@@ -200,6 +235,11 @@ def _record_matches(
 
 def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     integrity: list[str] = []
+
+    unexpected_fields = sorted(set(proof) - _PROOF_FIELDS)
+    if unexpected_fields:
+        integrity.append("UNEXPECTED_PROOF_FIELDS:" + ",".join(unexpected_fields))
+
     supplied_digest = proof.get("proof_digest")
     if not valid_digest(str(supplied_digest or "")):
         integrity.append("INVALID_PROOF_DIGEST_FORMAT")
