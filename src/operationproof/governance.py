@@ -39,6 +39,23 @@ def _required_contexts(protection: Mapping[str, Any]) -> set[str]:
     return contexts
 
 
+def _has_pull_request_bypass(value: object) -> bool:
+    if value is None:
+        return False
+    if not isinstance(value, Mapping):
+        return True
+
+    for key in ("users", "teams", "apps"):
+        actors = value.get(key)
+        if actors is None:
+            continue
+        if not isinstance(actors, Sequence) or isinstance(actors, (str, bytes)):
+            return True
+        if actors:
+            return True
+    return False
+
+
 def verify_protection_document(
     protection: Mapping[str, Any],
     policy: Mapping[str, Any],
@@ -55,6 +72,8 @@ def verify_protection_document(
         isinstance(item, str) and item for item in expected_contexts
     ):
         raise GovernanceVerificationError("policy required status contexts are invalid")
+    if len(expected_contexts) != len(set(expected_contexts)):
+        raise GovernanceVerificationError("policy required status contexts are duplicated")
 
     status = protection.get("required_status_checks")
     if not isinstance(status, Mapping):
@@ -62,8 +81,12 @@ def verify_protection_document(
     else:
         if status.get("strict") is not True:
             reasons.append("REQUIRED_STATUS_CHECKS_NOT_STRICT")
-        missing = sorted(set(expected_contexts) - _required_contexts(protection))
+        expected_set = set(expected_contexts)
+        live_set = _required_contexts(protection)
+        missing = sorted(expected_set - live_set)
+        unexpected = sorted(live_set - expected_set)
         reasons.extend(f"REQUIRED_STATUS_CHECK_MISSING:{name}" for name in missing)
+        reasons.extend(f"UNEXPECTED_REQUIRED_STATUS_CHECK:{name}" for name in unexpected)
 
     if _enabled(protection.get("enforce_admins")) is not True:
         reasons.append("ADMIN_ENFORCEMENT_DISABLED")
@@ -94,6 +117,8 @@ def verify_protection_document(
                 field="require_last_push_approval",
             ):
                 reasons.append("LAST_PUSH_APPROVAL_POLICY_MISMATCH")
+            if _has_pull_request_bypass(pull_request.get("bypass_pull_request_allowances")):
+                reasons.append("PULL_REQUEST_BYPASS_ALLOWANCE_PRESENT")
 
     booleans = (
         ("required_conversation_resolution", "CONVERSATION_RESOLUTION_DISABLED"),
