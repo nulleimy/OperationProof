@@ -1,6 +1,15 @@
 """OperationProof public library API."""
 
 from .builder import build_final_proof, build_pre_proof
+from .conformance import (
+    CONFORMANCE_CONTRACT,
+    ConformanceScenario,
+    ProviderConformanceCase,
+    ProviderConformanceCaseResult,
+    ProviderConformanceError,
+    ProviderConformanceReport,
+    run_provider_conformance,
+)
 from .domain import EvidenceEnvelope, Layer, ProofDecision, Verdict
 from .execution import (
     ExecutionEffect,
@@ -8,6 +17,14 @@ from .execution import (
     ExecutionReceiptVerificationResult,
     build_execution_receipt,
     verify_execution_receipt,
+)
+from .provider import (
+    PROVIDER_ADAPTER_CONTRACT,
+    AdapterOutputValidationResult,
+    ProviderAdapterContractError,
+    ProviderAdapterManifest,
+    ProviderAdapterRegistry,
+    validate_adapter_output,
 )
 from .sdk import (
     SDK_CONTRACT,
@@ -33,7 +50,11 @@ from .trust import (
 from .verifier import VerificationResult, verify_proof
 
 __all__ = [
+    "CONFORMANCE_CONTRACT",
+    "PROVIDER_ADAPTER_CONTRACT",
     "SDK_CONTRACT",
+    "AdapterOutputValidationResult",
+    "ConformanceScenario",
     "EvidenceEnvelope",
     "ExecutionEffect",
     "ExecutionOutcome",
@@ -44,6 +65,13 @@ __all__ = [
     "ProofAssessment",
     "ProofDecision",
     "ProofDocumentError",
+    "ProviderAdapterContractError",
+    "ProviderAdapterManifest",
+    "ProviderAdapterRegistry",
+    "ProviderConformanceCase",
+    "ProviderConformanceCaseResult",
+    "ProviderConformanceError",
+    "ProviderConformanceReport",
     "ProviderTrustRegistry",
     "SubjectBindingError",
     "TrustVerificationContext",
@@ -59,6 +87,8 @@ __all__ = [
     "canonical_proof_json",
     "make_subject_bound_trust_verifier",
     "parse_proof_json",
+    "run_provider_conformance",
+    "validate_adapter_output",
     "verify_execution_receipt",
     "verify_proof",
     "verify_proof_trust",
