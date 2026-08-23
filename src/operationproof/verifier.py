@@ -221,6 +221,10 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
 
     semantic_reasons: list[str] = []
     if phase == "PRE" and isinstance(operation_id, str):
+        if "pre_proof" in proof:
+            integrity.append("PRE_PROOF_FIELD_FORBIDDEN")
+        if "pre_proof_digest" in proof:
+            integrity.append("PRE_PROOF_DIGEST_FIELD_FORBIDDEN")
         decision, semantic_reasons = evaluate_pre_semantics(operation_id, evidence)
         expected_decision = decision.value
     elif phase == "FINAL":

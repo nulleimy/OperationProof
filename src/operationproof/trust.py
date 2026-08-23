@@ -127,7 +127,9 @@ def verify_proof_trust(
     proof_digest = str(proof.get("proof_digest"))
     pre_proof_digest_raw = proof.get("pre_proof_digest")
     pre_proof_digest = (
-        str(pre_proof_digest_raw) if isinstance(pre_proof_digest_raw, str) else None
+        str(pre_proof_digest_raw)
+        if root_phase == "FINAL" and isinstance(pre_proof_digest_raw, str)
+        else None
     )
 
     reasons: list[str] = []
