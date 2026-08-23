@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/operation-subject.v1.schema.json",
+  "title": "OperationSubject v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation_id",
+    "actor_digest",
+    "intent_digest",
+    "target_digest",
+    "state_digest"
+  ],
+  "properties": {
+    "schema": {"const": "operationproof.operation-subject.v1"},
+    "operation_id": {"type": "string", "minLength": 1},
+    "actor_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "intent_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "target_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "state_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
