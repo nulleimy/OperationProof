@@ -310,21 +310,6 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("CASER_CONTENT_IDENTITY_CHECK_MISMATCH")
 
         integrity_verified, outcome_verified, post_state_claim = _claims(verification)
-        _validate_strength_contract(
-            verification,
-            outcome_verified=outcome_verified,
-            post_state_verified=post_state_claim,
-        )
-        outcome = _verified_outcome(
-            verification,
-            checks,
-            outcome_verified=outcome_verified,
-        )
-        post_state_verified = _verified_post_state(
-            verification,
-            checks,
-            post_state_verified=post_state_claim,
-        )
 
         if not isinstance(binding, Mapping):
             raise CaserExecutionError("INVALID_CASER_EXECUTION_BINDING")
@@ -369,6 +354,21 @@ class CaserExecutionAdapter:
         if trusted_binding is not True:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
 
+        _validate_strength_contract(
+            verification,
+            outcome_verified=outcome_verified,
+            post_state_verified=post_state_claim,
+        )
+        outcome = _verified_outcome(
+            verification,
+            checks,
+            outcome_verified=outcome_verified,
+        )
+        post_state_verified = _verified_post_state(
+            verification,
+            checks,
+            post_state_verified=post_state_claim,
+        )
         effect = _verified_effect(checks)
         normalized = build_execution_receipt(
             provider=cls.provider_id,
