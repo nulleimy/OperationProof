@@ -634,4 +634,14 @@ def make_vone_execution_grant_trust_verifier(
         except Exception:  # noqa: BLE001 - provider trust boundary must fail closed
             return False
 
-    return verify
+    def verify_with_snapshot(
+        envelope: Mapping[str, Any],
+        context: TrustVerificationContext,
+    ) -> bool:
+        try:
+            envelope_snapshot = _snapshot_document(envelope, "INVALID_VONE_EVIDENCE")
+        except Exception:  # noqa: BLE001 - evidence snapshot boundary must fail closed
+            return False
+        return verify(envelope_snapshot, context)
+
+    return verify_with_snapshot
