@@ -49,6 +49,8 @@ def _headers() -> dict[str, str]:
 
 
 def _error_response(status_code: int, reason_code: str) -> JSONResponse:
+    if len(reason_code) > 256:
+        reason_code = "INVALID_PROOF_DOCUMENT"
     return JSONResponse(
         status_code=status_code,
         content={
@@ -66,7 +68,10 @@ def _content_length(request: Request) -> int | None:
         return None
     if not raw.isdecimal():
         raise SidecarRequestError(400, "INVALID_CONTENT_LENGTH")
-    value = int(raw)
+    try:
+        value = int(raw)
+    except (ValueError, OverflowError) as exc:
+        raise SidecarRequestError(400, "INVALID_CONTENT_LENGTH") from exc
     if value < 0:
         raise SidecarRequestError(400, "INVALID_CONTENT_LENGTH")
     return value
@@ -80,9 +85,9 @@ async def _read_bounded_body(request: Request, max_body_bytes: int) -> bytes:
     body = bytearray()
     try:
         async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body) > max_body_bytes:
+            if len(body) + len(chunk) > max_body_bytes:
                 raise SidecarRequestError(413, "REQUEST_BODY_TOO_LARGE")
+            body.extend(chunk)
     except SidecarRequestError:
         raise
     except Exception as exc:  # noqa: BLE001 - network boundary must fail closed
