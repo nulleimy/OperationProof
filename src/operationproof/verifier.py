@@ -378,9 +378,9 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
             integrity.extend(
                 f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
             )
+        if isinstance(pre_proof, dict) and pre_proof.get("schema") != schema:
+            integrity.append("PRE_PROOF_SCHEMA_MISMATCH")
         if schema == "operationproof.operation-proof.v2" and isinstance(pre_proof, dict):
-            if pre_proof.get("schema") != schema:
-                integrity.append("PRE_PROOF_SCHEMA_MISMATCH")
             if pre_proof.get("subject") != proof.get("subject"):
                 integrity.append("PRE_PROOF_SUBJECT_MISMATCH")
             if pre_proof.get("subject_digest") != proof.get("subject_digest"):
