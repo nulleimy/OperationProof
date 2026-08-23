@@ -10,9 +10,17 @@ from .verifier import verify_proof
 
 DIRECT_VERIFICATION_STAGE: Final = "DIRECT"
 EMBEDDED_PRE_OF_FINAL_STAGE: Final = "EMBEDDED_PRE_OF_FINAL"
-_VERIFICATION_STAGE: ContextVar[str] = ContextVar(
-    "operationproof_trust_verification_stage",
-    default=DIRECT_VERIFICATION_STAGE,
+
+
+@dataclass(slots=True)
+class _VerificationStageInvocation:
+    stage: str
+    active: bool = True
+
+
+_VERIFICATION_INVOCATION: ContextVar[_VerificationStageInvocation | None] = ContextVar(
+    "operationproof_trust_verification_invocation",
+    default=None,
 )
 
 
@@ -22,8 +30,9 @@ class TrustVerificationContext:
 
     The dataclass field contract intentionally remains the original six-field R3
     contract. ``verification_stage`` is an ephemeral callback-time property backed
-    by a private ContextVar, so legacy equality/hash/serialization behavior is not
-    changed for non-stage-aware providers.
+    by a private, revocable invocation marker. The marker is not serialized and is
+    revoked when the provider callback returns, including in contexts inherited by
+    child asyncio tasks.
     """
 
     root_phase: str
@@ -35,9 +44,12 @@ class TrustVerificationContext:
 
     @property
     def verification_stage(self) -> str:
-        """Return the trusted internal stage only while a verifier callback runs."""
+        """Return the trusted stage only for an active provider-verifier invocation."""
 
-        return _VERIFICATION_STAGE.get()
+        invocation = _VERIFICATION_INVOCATION.get()
+        if invocation is None or invocation.active is not True:
+            return DIRECT_VERIFICATION_STAGE
+        return invocation.stage
 
 
 EvidenceTrustVerifier = Callable[[Mapping[str, Any], TrustVerificationContext], bool]
@@ -111,13 +123,15 @@ def _verify_evidence_trust(
     if verifier is None:
         return [f"UNREGISTERED_PROVIDER:{layer}:{provider}"]
 
-    token = _VERIFICATION_STAGE.set(verification_stage)
+    invocation = _VerificationStageInvocation(stage=verification_stage)
+    token = _VERIFICATION_INVOCATION.set(invocation)
     try:
         trusted = verifier(item, context)
     except Exception:  # noqa: BLE001 - external verifier boundary must fail closed
         return [f"PROVIDER_TRUST_VERIFIER_ERROR:{layer}:{provider}"]
     finally:
-        _VERIFICATION_STAGE.reset(token)
+        invocation.active = False
+        _VERIFICATION_INVOCATION.reset(token)
 
     if trusted is not True:
         return [f"UNTRUSTED_PROVIDER_EVIDENCE:{layer}:{provider}"]
@@ -203,8 +217,9 @@ def verify_proof_trust(
     verification recursively verifies the exact embedded PRE proof with a trusted
     callback-time post-execution stage while retaining that PRE proof's own phase,
     digest, operation id, and absent ``pre_proof_digest``. The stage is not a
-    serialized/dataclass field, preventing both proof-controlled stage laundering and
-    compatibility drift for existing ProviderTrustRegistry users.
+    serialized/dataclass field and its invocation marker is revoked on callback exit,
+    preventing proof-controlled or child-task stage laundering while preserving the
+    original ProviderTrustRegistry context contract.
     """
 
     return _verify_proof_trust_at_stage(
