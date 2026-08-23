@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from .sdk import ProofDocumentError, assess_proof, parse_proof_json
 from .trust import ProviderTrustRegistry
@@ -181,7 +182,7 @@ def create_app(
         except ProofDocumentError as exc:
             return _error_response(400, str(exc))
 
-        assessment = assess_proof(proof, registry=registry)
+        assessment = await run_in_threadpool(assess_proof, proof, registry=registry)
         return JSONResponse(
             status_code=200,
             content={
