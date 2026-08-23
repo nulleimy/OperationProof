@@ -491,8 +491,8 @@ def make_vone_execution_grant_trust_verifier(
     PRE proof is later revalidated inside a FINAL proof, the grant may legitimately
     be consumed. That stage therefore requires an authoritative
     ``grant-consumption-witness/v1`` resolved by grant JTI and authenticated by
-    ``consumption_verifier``. A consumed grant is never accepted in DIRECT PRE merely
-    because a witness exists.
+    ``consumption_verifier``. Both trust stages remain inside the grant evidence
+    lifetime; the witness proves consumption, not an extension of authorization TTL.
     """
 
     if not callable(grant_resolver):
@@ -551,7 +551,7 @@ def make_vone_execution_grant_trust_verifier(
                 grant=grant,
                 operation_id=context.operation_id,
                 now=now_value,
-                require_current_window=context.verification_stage == DIRECT_VERIFICATION_STAGE,
+                require_current_window=True,
             )
             if authoritative_document_digest != grant_document_digest:
                 return False
