@@ -59,7 +59,7 @@ class ProviderTrustRegistry:
         if not isinstance(provider, str) or not provider:
             raise ValueError("INVALID_TRUST_PROVIDER")
         if not callable(verifier):
-            raise ValueError("INVALID_TRUST_VERIFIER")
+            raise TypeError("INVALID_TRUST_VERIFIER")
 
         key = (layer_name, provider)
         if key in self._verifiers:
@@ -92,7 +92,7 @@ def _verify_evidence_trust(
 
     try:
         trusted = verifier(item, context)
-    except Exception:
+    except Exception:  # noqa: BLE001 - external verifier boundary must fail closed
         return [f"PROVIDER_TRUST_VERIFIER_ERROR:{layer}:{provider}"]
 
     if trusted is not True:
