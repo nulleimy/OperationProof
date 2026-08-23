@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -11,7 +10,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from operationproof.governance import (  # noqa: E402
+from operationproof.governance import (
     GovernanceVerificationError,
     verify_branch_summary,
     verify_protection_document,
