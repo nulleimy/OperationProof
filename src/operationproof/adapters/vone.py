@@ -7,9 +7,15 @@ from typing import Any
 
 from ..canonical import canonical_json_bytes, sha256_digest, valid_digest
 from ..domain import EvidenceEnvelope, Layer, Verdict
-from ..trust import TrustVerificationContext
+from ..trust import (
+    DIRECT_VERIFICATION_STAGE,
+    EMBEDDED_PRE_OF_FINAL_STAGE,
+    TrustVerificationContext,
+)
 
 _GRANT_TYPE = "execution-grant/v2"
+_CONSUMPTION_WITNESS_TYPE = "grant-consumption-witness/v1"
+_SERIALIZATION_CONTRACT = "sqlite-begin-immediate/v1"
 _PROVIDER_ID = "vone"
 _REQUIRED_PERMISSION = "execution.run"
 _ONE_TIME_USE = "ONE_TIME"
@@ -101,6 +107,48 @@ _TEXT_FIELDS = frozenset(
         "issuer_revision",
     }
 )
+_CONSUMPTION_FIELDS = frozenset(
+    {
+        "schema_version",
+        "witness_type",
+        "consumption_id",
+        "jti",
+        "grant_id",
+        "grant_digest",
+        "execution_id",
+        "authorization_snapshot_digest",
+        "execution_capsule_digest",
+        "runner_class",
+        "conformance_witness_digest",
+        "clock_witness_digest",
+        "live_revocation_epoch",
+        "consumed_at",
+        "serialization_contract",
+        "authority_revision",
+        "witness_digest",
+    }
+)
+_CONSUMPTION_TEXT_FIELDS = frozenset(
+    {
+        "consumption_id",
+        "jti",
+        "grant_id",
+        "execution_id",
+        "runner_class",
+        "serialization_contract",
+        "authority_revision",
+    }
+)
+_CONSUMPTION_DIGEST_FIELDS = frozenset(
+    {
+        "grant_digest",
+        "authorization_snapshot_digest",
+        "execution_capsule_digest",
+        "conformance_witness_digest",
+        "clock_witness_digest",
+        "witness_digest",
+    }
+)
 _EVIDENCE_FIELDS = frozenset(
     {
         "schema",
@@ -142,6 +190,8 @@ class VOneAuthorizationError(ValueError):
 
 GrantVerifier = Callable[[Mapping[str, Any]], bool]
 GrantResolver = Callable[[str], Mapping[str, Any] | None]
+ConsumptionResolver = Callable[[str], Mapping[str, Any] | None]
+ConsumptionVerifier = Callable[[Mapping[str, Any]], bool]
 Clock = Callable[[], datetime]
 
 
@@ -178,15 +228,6 @@ def _parse_vone_timestamp(value: object, code: str) -> datetime:
     return normalized
 
 
-def _native_grant_digest(grant: Mapping[str, Any]) -> str:
-    payload = {key: grant[key] for key in _GRANT_FIELDS if key != "grant_digest"}
-    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
-
-
-def _document_digest(grant: Mapping[str, Any]) -> str:
-    return sha256_digest(dict(grant))
-
-
 def _validate_now(value: object) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise VOneAuthorizationError("INVALID_VERIFICATION_NOW")
@@ -196,11 +237,26 @@ def _validate_now(value: object) -> datetime:
         raise VOneAuthorizationError("INVALID_VERIFICATION_NOW") from exc
 
 
+def _native_grant_digest(grant: Mapping[str, Any]) -> str:
+    payload = {key: grant[key] for key in _GRANT_FIELDS if key != "grant_digest"}
+    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+
+
+def _native_consumption_witness_digest(witness: Mapping[str, Any]) -> str:
+    payload = {key: witness[key] for key in _CONSUMPTION_FIELDS if key != "witness_digest"}
+    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+
+
+def _document_digest(grant: Mapping[str, Any]) -> str:
+    return sha256_digest(dict(grant))
+
+
 def _validate_grant(
     *,
     grant: Mapping[str, Any],
     operation_id: str,
     now: datetime,
+    require_current_window: bool,
 ) -> tuple[datetime, datetime, str]:
     if set(grant) != _GRANT_FIELDS:
         raise VOneAuthorizationError("INVALID_VONE_GRANT_FIELDS")
@@ -239,13 +295,81 @@ def _validate_grant(
         raise VOneAuthorizationError("VONE_GRANT_TTL_EXCEEDED")
     if (issued - checked).total_seconds() > _MAX_PRECONDITION_TO_GRANT_SECONDS:
         raise VOneAuthorizationError("VONE_PRECONDITION_TOO_OLD")
-    if expires <= _validate_now(now):
-        raise VOneAuthorizationError("EXPIRED_VONE_GRANT")
+
+    now_utc = _validate_now(now)
+    if require_current_window:
+        if now_utc < issued:
+            raise VOneAuthorizationError("VONE_GRANT_NOT_YET_VALID")
+        if now_utc >= expires:
+            raise VOneAuthorizationError("EXPIRED_VONE_GRANT")
 
     grant_digest = str(grant.get("grant_digest"))
     if grant_digest != _native_grant_digest(grant):
         raise VOneAuthorizationError("VONE_GRANT_DIGEST_MISMATCH")
     return issued, expires, _document_digest(grant)
+
+
+def _validate_consumption_witness(
+    *,
+    witness: Mapping[str, Any],
+    grant: Mapping[str, Any],
+    operation_id: str,
+    issued: datetime,
+    expires: datetime,
+    now: datetime,
+) -> None:
+    if set(witness) != _CONSUMPTION_FIELDS:
+        raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_FIELDS")
+    if (
+        witness.get("schema_version") != 1
+        or witness.get("witness_type") != _CONSUMPTION_WITNESS_TYPE
+    ):
+        raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_PROTOCOL")
+
+    for field in _CONSUMPTION_TEXT_FIELDS:
+        _require_text(witness.get(field), f"INVALID_VONE_CONSUMPTION_FIELD:{field}")
+    for field in _CONSUMPTION_DIGEST_FIELDS:
+        _require_native_digest(
+            witness.get(field),
+            f"INVALID_VONE_CONSUMPTION_DIGEST:{field}",
+        )
+
+    if witness.get("serialization_contract") != _SERIALIZATION_CONTRACT:
+        raise VOneAuthorizationError("VONE_CONSUMPTION_SERIALIZATION_MISMATCH")
+    live_epoch = witness.get("live_revocation_epoch")
+    if type(live_epoch) is not int or live_epoch < 0:
+        raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_REVOCATION_EPOCH")
+    if live_epoch != grant.get("revocation_epoch"):
+        raise VOneAuthorizationError("VONE_CONSUMPTION_REVOCATION_EPOCH_MISMATCH")
+
+    bindings = {
+        "jti": grant["jti"],
+        "grant_id": grant["grant_id"],
+        "grant_digest": grant["grant_digest"],
+        "execution_id": operation_id,
+        "authorization_snapshot_digest": grant["authorization_snapshot_digest"],
+        "execution_capsule_digest": grant["execution_capsule_digest"],
+        "runner_class": grant["runner_class"],
+    }
+    for field, expected in bindings.items():
+        if witness.get(field) != expected:
+            raise VOneAuthorizationError(f"VONE_CONSUMPTION_BINDING_MISMATCH:{field}")
+
+    consumed = _parse_vone_timestamp(
+        witness.get("consumed_at"),
+        "INVALID_VONE_CONSUMED_AT",
+    )
+    now_utc = _validate_now(now)
+    if consumed < issued:
+        raise VOneAuthorizationError("VONE_CONSUMPTION_PRECEDES_GRANT")
+    if consumed >= expires:
+        raise VOneAuthorizationError("VONE_CONSUMPTION_AFTER_EXPIRY")
+    if consumed > now_utc:
+        raise VOneAuthorizationError("VONE_CONSUMPTION_IN_FUTURE")
+
+    supplied = str(witness.get("witness_digest"))
+    if supplied != _native_consumption_witness_digest(witness):
+        raise VOneAuthorizationError("VONE_CONSUMPTION_DIGEST_MISMATCH")
 
 
 def _evidence_from_grant(
@@ -334,6 +458,7 @@ class VOneExecutionGrantAdapter:
             grant=grant,
             operation_id=operation_id,
             now=now_value,
+            require_current_window=True,
         )
         try:
             trusted = grant_verifier(grant)
@@ -356,13 +481,28 @@ def make_vone_execution_grant_trust_verifier(
     grant_resolver: GrantResolver,
     grant_verifier: GrantVerifier,
     clock: Clock | None = None,
+    consumption_resolver: ConsumptionResolver | None = None,
+    consumption_verifier: ConsumptionVerifier | None = None,
 ) -> Callable[[Mapping[str, Any], TrustVerificationContext], bool]:
-    """Build an R3 PRE provider-trust verifier backed by authoritative V-One grant lookup."""
+    """Build an R3 V-One verifier with distinct admission and post-execution trust.
+
+    DIRECT PRE verification uses ``grant_verifier`` as the live admission authority;
+    deployments should require the ONE_TIME grant to still be unused. When the same
+    PRE proof is later revalidated inside a FINAL proof, the grant may legitimately
+    be consumed. That stage therefore requires an authoritative
+    ``grant-consumption-witness/v1`` resolved by grant JTI and authenticated by
+    ``consumption_verifier``. A consumed grant is never accepted in DIRECT PRE merely
+    because a witness exists.
+    """
 
     if not callable(grant_resolver):
         raise VOneAuthorizationError("INVALID_VONE_GRANT_RESOLVER")
     if not callable(grant_verifier):
         raise VOneAuthorizationError("INVALID_VONE_GRANT_VERIFIER")
+    if consumption_resolver is not None and not callable(consumption_resolver):
+        raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_RESOLVER")
+    if consumption_verifier is not None and not callable(consumption_verifier):
+        raise VOneAuthorizationError("INVALID_VONE_CONSUMPTION_VERIFIER")
     clock = clock or (lambda: datetime.now(UTC))
     if not callable(clock):
         raise VOneAuthorizationError("INVALID_VONE_CLOCK")
@@ -375,6 +515,11 @@ def make_vone_execution_grant_trust_verifier(
             if context.root_phase != "PRE" or context.evidence_phase != "PRE":
                 return False
             if context.pre_proof_digest is not None:
+                return False
+            if context.verification_stage not in {
+                DIRECT_VERIFICATION_STAGE,
+                EMBEDDED_PRE_OF_FINAL_STAGE,
+            }:
                 return False
             if set(envelope) != _EVIDENCE_FIELDS:
                 return False
@@ -401,11 +546,50 @@ def make_vone_execution_grant_trust_verifier(
             grant = grant_resolver(grant_document_digest)
             if not isinstance(grant, Mapping):
                 return False
-            expected = VOneExecutionGrantAdapter.adapt(
+            now_value = clock()
+            issued, expires, authoritative_document_digest = _validate_grant(
+                grant=grant,
+                operation_id=context.operation_id,
+                now=now_value,
+                require_current_window=context.verification_stage == DIRECT_VERIFICATION_STAGE,
+            )
+            if authoritative_document_digest != grant_document_digest:
+                return False
+
+            if context.verification_stage == DIRECT_VERIFICATION_STAGE:
+                try:
+                    trusted = grant_verifier(grant)
+                except Exception:  # noqa: BLE001 - external admission authority must fail closed
+                    return False
+                if trusted is not True:
+                    return False
+            else:
+                if consumption_resolver is None or consumption_verifier is None:
+                    return False
+                witness = consumption_resolver(str(grant["jti"]))
+                if not isinstance(witness, Mapping):
+                    return False
+                _validate_consumption_witness(
+                    witness=witness,
+                    grant=grant,
+                    operation_id=context.operation_id,
+                    issued=issued,
+                    expires=expires,
+                    now=now_value,
+                )
+                try:
+                    consumption_trusted = consumption_verifier(witness)
+                except Exception:  # noqa: BLE001 - external witness authority must fail closed
+                    return False
+                if consumption_trusted is not True:
+                    return False
+
+            expected = _evidence_from_grant(
                 operation_id=context.operation_id,
                 grant=grant,
-                grant_verifier=grant_verifier,
-                now=clock(),
+                issued=issued,
+                expires=expires,
+                grant_document_digest=authoritative_document_digest,
             )
             return expected.to_dict() == dict(envelope)
         except Exception:  # noqa: BLE001 - provider trust boundary must fail closed
