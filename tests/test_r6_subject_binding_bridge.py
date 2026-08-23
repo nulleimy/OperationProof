@@ -43,7 +43,7 @@ def native_evidence(layer: Layer) -> EvidenceEnvelope:
         ),
         evidence_digest=sha256_digest({"native_evidence": layer.value}),
         issued_at="2026-08-23T19:40:00+00:00",
-        expires_at="2026-08-23T20:30:00+00:00",
+        expires_at="2030-01-01T00:00:00+00:00",
         metadata={"native_marker": layer.value},
     )
 
