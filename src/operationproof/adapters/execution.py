@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from ..canonical import sha256_digest, valid_digest
@@ -13,8 +14,11 @@ _RECEIPT_SCHEMA = "operationproof.execution-receipt.v1"
 _EVIDENCE_SCHEMA = "operationproof.evidence-envelope.v1"
 _ALLOWED_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN"}
 _RFC3339_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})"
+    r"[Tt](?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+    r"(?P<fraction>\.\d+)?(?P<timezone>[Zz]|[+-]\d{2}:\d{2})$"
 )
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 _RECEIPT_PAYLOAD_FIELDS = (
     "schema",
     "provider",
@@ -61,19 +65,51 @@ ReceiptVerifier = Callable[[Mapping[str, Any]], bool]
 ReceiptResolver = Callable[[str], Mapping[str, Any] | None]
 
 
-def _parse_timestamp(value: Any, code: str) -> datetime:
+def _parse_timestamp(value: Any, code: str) -> Decimal:
+    """Parse RFC 3339 into exact UTC seconds without truncating fractional precision."""
+
     if not isinstance(value, str) or not value:
         raise ExecutionReceiptError(code)
-    if _RFC3339_TIMESTAMP_RE.fullmatch(value) is None:
+    match = _RFC3339_TIMESTAMP_RE.fullmatch(value)
+    if match is None:
         raise ExecutionReceiptError(code)
-    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+
+    year = int(match.group("year"))
+    month = int(match.group("month"))
+    day = int(match.group("day"))
+    hour = int(match.group("hour"))
+    minute = int(match.group("minute"))
+    second = int(match.group("second"))
+    if hour > 23 or minute > 59 or second > 60:
+        raise ExecutionReceiptError(code)
+
+    timezone = match.group("timezone")
+    offset_seconds = 0
+    if timezone.casefold() != "z":
+        offset_hour = int(timezone[1:3])
+        offset_minute = int(timezone[4:6])
+        if offset_hour > 23 or offset_minute > 59:
+            raise ExecutionReceiptError(code)
+        offset_seconds = offset_hour * 3600 + offset_minute * 60
+        if timezone[0] == "-":
+            offset_seconds = -offset_seconds
+
+    base_second = min(second, 59)
     try:
-        parsed = datetime.fromisoformat(normalized)
+        base = datetime(year, month, day, hour, minute, base_second, tzinfo=UTC)
     except ValueError as exc:
         raise ExecutionReceiptError(code) from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ExecutionReceiptError(code)
-    return parsed.astimezone(UTC)
+
+    delta = base - _EPOCH
+    exact_seconds = Decimal(delta.days * 86400 + delta.seconds)
+    if second == 60:
+        exact_seconds += Decimal(1)
+
+    fraction = match.group("fraction")
+    if fraction is not None:
+        exact_seconds += Decimal(f"0{fraction}")
+
+    return exact_seconds - Decimal(offset_seconds)
 
 
 def _receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
