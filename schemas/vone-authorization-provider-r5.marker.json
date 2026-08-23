@@ -1,8 +1,0 @@
-{
-  "schema": "operationproof.provider-profile-marker.v1",
-  "provider": "vone",
-  "layer": "authorization",
-  "native_artifact": "execution-grant/v2",
-  "operation_binding": "operation_id == execution_id",
-  "pass_requires_external_authentication": true
-}
