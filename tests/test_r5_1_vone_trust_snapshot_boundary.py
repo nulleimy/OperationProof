@@ -226,3 +226,81 @@ def test_embedded_consumption_verifier_mutation_is_detached() -> None:
     assert verify_proof_trust(final, registry).trusted is True
     assert witness["execution_id"] == _OPERATION_ID
     assert witness["authority_revision"] == "durable-grant-consumption-r1"
+
+
+def test_consumption_hook_cannot_rewrite_proof_envelope_after_integrity_check() -> None:
+    grant = _grant()
+    witness = _witness(grant)
+    authoritative = _authorization(grant)
+    forged_metadata = dict(authoritative.metadata)
+    forged_metadata["issuer_revision"] = "forged-but-structurally-valid"
+    forged_authorization = EvidenceEnvelope(
+        layer=authoritative.layer,
+        provider=authoritative.provider,
+        operation_id=authoritative.operation_id,
+        decision=authoritative.decision,
+        verdict=authoritative.verdict,
+        subject_digest=authoritative.subject_digest,
+        evidence_digest=authoritative.evidence_digest,
+        issued_at=authoritative.issued_at,
+        expires_at=authoritative.expires_at,
+        metadata=forged_metadata,
+    )
+
+    pre_items: list[EvidenceEnvelope] = []
+    for layer in PRE_LAYERS:
+        if layer == Layer.AUTHORIZATION:
+            pre_items.append(forged_authorization)
+        else:
+            pre_items.append(
+                EvidenceEnvelope(
+                    layer=layer,
+                    provider=f"provider-{layer.value}",
+                    operation_id=_OPERATION_ID,
+                    decision="PASS",
+                    verdict=Verdict.PASS,
+                    subject_digest=sha256_digest({"subject": layer.value}),
+                    evidence_digest=sha256_digest({"evidence": layer.value}),
+                    issued_at="2099-01-01T00:00:00.000+00:00",
+                    metadata={},
+                )
+            )
+    pre = build_pre_proof(_OPERATION_ID, pre_items)
+    execution = EvidenceEnvelope(
+        layer=Layer.EXECUTION,
+        provider="execution-test",
+        operation_id=_OPERATION_ID,
+        decision="SUCCEEDED",
+        verdict=Verdict.PASS,
+        subject_digest=sha256_digest({"subject": "execution"}),
+        evidence_digest=sha256_digest({"evidence": "execution"}),
+        issued_at="2099-01-01T00:00:50.000+00:00",
+        metadata={},
+    )
+    final = build_final_proof(pre, execution)
+    proof_envelope = next(
+        item
+        for item in final["pre_proof"]["evidence"]
+        if item["layer"] == Layer.AUTHORIZATION.value
+    )
+
+    def admission_must_not_run(_grant: object) -> bool:
+        raise AssertionError("embedded PRE must use consumption authority")
+
+    def rewrite_live_proof(_candidate: dict[str, Any]) -> bool:
+        proof_envelope.clear()
+        proof_envelope.update(authoritative.to_dict())
+        return True
+
+    registry = _registry(
+        grant=grant,
+        witness=witness,
+        grant_verifier=admission_must_not_run,
+        consumption_verifier=rewrite_live_proof,
+    )
+
+    result = verify_proof_trust(final, registry)
+
+    assert proof_envelope == authoritative.to_dict()
+    assert result.trusted is False
+    assert "UNTRUSTED_PROVIDER_EVIDENCE:authorization:vone" in result.reason_codes
