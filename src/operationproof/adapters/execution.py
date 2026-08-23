@@ -10,6 +10,18 @@ from ..trust import TrustVerificationContext
 
 _RECEIPT_SCHEMA = "operationproof.execution-receipt.v1"
 _ALLOWED_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN"}
+_RECEIPT_PAYLOAD_FIELDS = (
+    "schema",
+    "provider",
+    "receipt_id",
+    "operation_id",
+    "pre_proof_digest",
+    "status",
+    "result_digest",
+    "started_at",
+    "completed_at",
+)
+_RECEIPT_FIELDS = frozenset((*_RECEIPT_PAYLOAD_FIELDS, "receipt_digest"))
 
 
 class ExecutionReceiptError(ValueError):
@@ -34,17 +46,7 @@ def _parse_timestamp(value: Any, code: str) -> datetime:
 
 
 def _receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
-    return {
-        "schema": receipt.get("schema"),
-        "provider": receipt.get("provider"),
-        "receipt_id": receipt.get("receipt_id"),
-        "operation_id": receipt.get("operation_id"),
-        "pre_proof_digest": receipt.get("pre_proof_digest"),
-        "status": receipt.get("status"),
-        "result_digest": receipt.get("result_digest"),
-        "started_at": receipt.get("started_at"),
-        "completed_at": receipt.get("completed_at"),
-    }
+    return {field: receipt.get(field) for field in _RECEIPT_PAYLOAD_FIELDS}
 
 
 def _validate_receipt(
@@ -54,6 +56,8 @@ def _validate_receipt(
     operation_id: str,
     pre_proof_digest: str,
 ) -> tuple[str, str, str]:
+    if set(receipt.keys()) != _RECEIPT_FIELDS:
+        raise ExecutionReceiptError("INVALID_EXECUTION_RECEIPT_FIELDS")
     if receipt.get("schema") != _RECEIPT_SCHEMA:
         raise ExecutionReceiptError("INVALID_EXECUTION_RECEIPT_SCHEMA")
     if receipt.get("provider") != expected_provider:
