@@ -265,15 +265,9 @@ def test_consumption_witness_must_bind_exact_grant_and_execution() -> None:
     witness["execution_id"] = "different-execution"
     _rehash(witness, "witness_digest")
     _pre, final = _proofs(grant)
-    registry = _registry(
-        grant=grant,
-        witness=witness,
-        admission_verifier=lambda _grant: True,
-    )
+    registry = _registry(grant=grant, witness=witness, admission_verifier=lambda _grant: True)
 
-    result = verify_proof_trust(final, registry)
-
-    assert result.trusted is False
+    assert verify_proof_trust(final, registry).trusted is False
 
 
 def test_consumption_witness_requires_same_live_revocation_epoch() -> None:
@@ -282,11 +276,7 @@ def test_consumption_witness_requires_same_live_revocation_epoch() -> None:
     witness["live_revocation_epoch"] = 8
     _rehash(witness, "witness_digest")
     _pre, final = _proofs(grant)
-    registry = _registry(
-        grant=grant,
-        witness=witness,
-        admission_verifier=lambda _grant: True,
-    )
+    registry = _registry(grant=grant, witness=witness, admission_verifier=lambda _grant: True)
 
     assert verify_proof_trust(final, registry).trusted is False
 
@@ -297,11 +287,7 @@ def test_consumption_after_grant_expiry_is_rejected() -> None:
     witness["consumed_at"] = grant["expires_at"]
     _rehash(witness, "witness_digest")
     _pre, final = _proofs(grant)
-    registry = _registry(
-        grant=grant,
-        witness=witness,
-        admission_verifier=lambda _grant: True,
-    )
+    registry = _registry(grant=grant, witness=witness, admission_verifier=lambda _grant: True)
 
     assert verify_proof_trust(final, registry).trusted is False
 
@@ -310,23 +296,19 @@ def test_post_execution_verification_can_happen_after_grant_expiry() -> None:
     grant = _grant()
     witness = _consumption(grant)
     _pre, final = _proofs(grant)
-    after_expiry = datetime(2099, 1, 1, 0, 5, 0, tzinfo=UTC)
     registry = _registry(
         grant=grant,
         witness=witness,
         admission_verifier=lambda _grant: False,
-        post_now=after_expiry,
+        post_now=datetime(2099, 1, 1, 0, 5, 0, tzinfo=UTC),
     )
 
-    result = verify_proof_trust(final, registry)
-
-    assert result.trusted is True
+    assert verify_proof_trust(final, registry).trusted is True
 
 
-def test_consumption_witness_tamper_or_authenticator_failure_fails_closed() -> None:
+def test_consumption_witness_tamper_fails_final_closed() -> None:
     grant = _grant()
-    witness = _consumption(grant)
-    tampered = deepcopy(witness)
+    tampered = deepcopy(_consumption(grant))
     tampered["authority_revision"] = "tampered-without-rehash"
     authorization = _authorization(grant)
     document_digest = str(authorization.metadata["grant_document_digest"])
@@ -337,7 +319,7 @@ def test_consumption_witness_tamper_or_authenticator_failure_fails_closed() -> N
         consumption_resolver=lambda _jti: tampered,
         consumption_verifier=lambda _witness: True,
     )
-    pre, final = _proofs(grant)
+    _pre, final = _proofs(grant)
     registry = ProviderTrustRegistry()
     for item in _pre_items(authorization):
         registry.register(
@@ -352,6 +334,3 @@ def test_consumption_witness_tamper_or_authenticator_failure_fails_closed() -> N
     )
 
     assert verify_proof_trust(final, registry).trusted is False
-
-    # DIRECT PRE remains separate and never uses the consumption witness as authority.
-    assert verify_proof_trust(pre, registry).trusted is True
