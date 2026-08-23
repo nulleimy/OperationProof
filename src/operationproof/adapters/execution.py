@@ -9,6 +9,7 @@ from ..domain import EvidenceEnvelope, Layer, Verdict
 from ..trust import TrustVerificationContext
 
 _RECEIPT_SCHEMA = "operationproof.execution-receipt.v1"
+_EVIDENCE_SCHEMA = "operationproof.evidence-envelope.v1"
 _ALLOWED_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN"}
 _RECEIPT_PAYLOAD_FIELDS = (
     "schema",
@@ -22,6 +23,30 @@ _RECEIPT_PAYLOAD_FIELDS = (
     "completed_at",
 )
 _RECEIPT_FIELDS = frozenset((*_RECEIPT_PAYLOAD_FIELDS, "receipt_digest"))
+_EVIDENCE_FIELDS = frozenset(
+    {
+        "schema",
+        "layer",
+        "provider",
+        "operation_id",
+        "decision",
+        "verdict",
+        "subject_digest",
+        "evidence_digest",
+        "issued_at",
+        "expires_at",
+        "metadata",
+    }
+)
+_METADATA_FIELDS = frozenset(
+    {
+        "adapter",
+        "receipt_protocol",
+        "receipt_id",
+        "receipt_digest",
+        "pre_proof_digest",
+    }
+)
 
 
 class ExecutionReceiptError(ValueError):
@@ -221,16 +246,29 @@ def make_execution_receipt_trust_verifier(
                 context.pre_proof_digest
             ):
                 return False
+            if set(envelope.keys()) != _EVIDENCE_FIELDS:
+                return False
+            if envelope.get("schema") != _EVIDENCE_SCHEMA:
+                return False
             if envelope.get("layer") != Layer.EXECUTION.value:
                 return False
             if envelope.get("provider") != provider_id:
                 return False
             if envelope.get("operation_id") != context.operation_id:
                 return False
+            if envelope.get("expires_at") is not None:
+                return False
 
             metadata = envelope.get("metadata")
             if not isinstance(metadata, Mapping):
                 return False
+            if set(metadata.keys()) != _METADATA_FIELDS:
+                return False
+            if metadata.get("adapter") != f"operationproof.{provider_id}.execution.v1":
+                return False
+            if metadata.get("receipt_protocol") != _RECEIPT_SCHEMA:
+                return False
+
             receipt_digest = metadata.get("receipt_digest")
             if not isinstance(receipt_digest, str) or not valid_digest(receipt_digest):
                 return False
@@ -253,6 +291,8 @@ def make_execution_receipt_trust_verifier(
             if envelope.get("decision") != status:
                 return False
             if envelope.get("verdict") != _verdict_for_status(status).value:
+                return False
+            if envelope.get("issued_at") != receipt.get("completed_at"):
                 return False
 
             expected_subject_digest = sha256_digest(
