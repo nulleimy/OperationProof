@@ -98,6 +98,29 @@ def _claims(verification: Mapping[str, Any]) -> tuple[bool, bool, bool]:
     return integrity, outcome, post_state
 
 
+def _verified_outcome(
+    verification: Mapping[str, Any],
+    *,
+    outcome_verified: bool,
+) -> ExecutionOutcome:
+    if not outcome_verified:
+        return ExecutionOutcome.UNKNOWN
+    if verification.get("runnerIndependent") is not True:
+        raise CaserExecutionError("CASER_OUTCOME_NOT_RUNNER_INDEPENDENT")
+
+    native_outcome = verification.get("executionOutcome")
+    if native_outcome not in {
+        ExecutionOutcome.SUCCEEDED.value,
+        ExecutionOutcome.FAILED.value,
+    }:
+        raise CaserExecutionError("INVALID_VERIFIED_CASER_EXECUTION_OUTCOME")
+
+    outcome_check = _require_pass_check(verification, "execution-outcome")
+    if outcome_check.get("observed") != native_outcome:
+        raise CaserExecutionError("CASER_EXECUTION_OUTCOME_CHECK_MISMATCH")
+    return ExecutionOutcome(native_outcome)
+
+
 class CaserExecutionAdapter:
     """Normalize CASER execution receipt + independent verification into execution evidence."""
 
@@ -183,6 +206,9 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("CASER_CONTENT_IDENTITY_CHECK_MISMATCH")
 
         integrity_verified, outcome_verified, post_state_verified = _claims(verification)
+        outcome = _verified_outcome(verification, outcome_verified=outcome_verified)
+        if post_state_verified:
+            _require_pass_check(verification, "provider-post-state")
 
         if not isinstance(binding, Mapping):
             raise CaserExecutionError("INVALID_CASER_EXECUTION_BINDING")
@@ -224,16 +250,6 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
 
         effect = _verified_effect(verification)
-        outcome = ExecutionOutcome.UNKNOWN
-        if outcome_verified:
-            native_outcome = verification.get("executionOutcome")
-            if native_outcome not in {
-                ExecutionOutcome.SUCCEEDED.value,
-                ExecutionOutcome.FAILED.value,
-            }:
-                raise CaserExecutionError("INVALID_VERIFIED_CASER_EXECUTION_OUTCOME")
-            outcome = ExecutionOutcome(native_outcome)
-
         normalized = build_execution_receipt(
             provider=cls.provider_id,
             operation_id=operation_id,
