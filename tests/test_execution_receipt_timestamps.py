@@ -98,6 +98,23 @@ def test_fractional_precision_beyond_microseconds_accepts_correct_order() -> Non
     _adapt(receipt, pre_proof_digest)
 
 
+def test_long_fractional_precision_is_compared_without_numeric_rounding() -> None:
+    pre_proof_digest = sha256_digest({"pre": "long-fraction-order"})
+    receipt = _receipt(pre_proof_digest=pre_proof_digest)
+    receipt["started_at"] = (
+        "2026-08-23T00:00:00."
+        "0000000000000000000000000000000000000000000000000000000000000009Z"
+    )
+    receipt["completed_at"] = (
+        "2026-08-23T00:00:00."
+        "0000000000000000000000000000000000000000000000000000000000000001Z"
+    )
+    receipt["receipt_digest"] = sha256_digest(_receipt_payload(receipt))
+
+    with pytest.raises(ExecutionReceiptError, match="INVALID_EXECUTION_TIME_WINDOW"):
+        _adapt(receipt, pre_proof_digest)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "error_code"),
     [
