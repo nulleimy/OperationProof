@@ -56,6 +56,23 @@ The default bind address is `127.0.0.1`. The trusted runtime refuses to start wi
 
 The sidecar provides `GET /healthz`, `GET /readyz`, and `POST /v1/assess`, bounds request bodies while streaming, rejects compressed request bodies, and does not expose mutable trust configuration over HTTP. See `docs/SIDECAR_RUNTIME.md`.
 
+## Provider conformance
+
+R9 adds a provider adapter framework without flattening provider-specific trust APIs. Every adapter declares an exact `operationproof.provider-adapter.v1` manifest and can be tested with the reusable `operationproof.provider-conformance.v1` runner.
+
+```python
+from operationproof import run_provider_conformance
+
+report = run_provider_conformance(
+    manifest,
+    adapter_error=MyAdapterError,
+    cases=my_cases,
+)
+assert report.passed, report.to_dict()
+```
+
+The mandatory profile covers valid normalization, operation-transplant rejection, untrusted authority, authority exceptions, caller-input mutation isolation, and deterministic output. A conformance PASS does not grant runtime provider trust. See `docs/PROVIDER_CONFORMANCE.md`.
+
 ## Non-goals
 
 OperationProof is not an IAM platform, policy engine, agent runtime, sandbox, DLP engine, observability backend, lineage platform, budget manager, or LLM judge. Providers remain external and are integrated through narrow adapters.
@@ -83,6 +100,8 @@ R6 introduces canonical `OperationSubject`, subject-bound proof v2, downgrade pr
 R7 adds the stable SDK/library contract: strict raw JSON parsing, deterministic serialization, pinned package-root exports, detached caller input, and `ProofAssessment` so integrity cannot be confused with governed acceptance.
 
 R8 adds the optional fail-closed sidecar API/runtime with trusted out-of-band registry bootstrap, loopback-only defaults, bounded HTTP input, liveness/readiness separation, and the same R7 acceptance semantics over HTTP.
+
+R9 adds exact provider adapter manifests, duplicate-safe discovery, normalized-envelope validation, a reusable six-scenario conformance runner, first-party HOWEDO/V-One/CASER conformance suites, and detached HOWEDO authority-callback inputs.
 
 ## Local verification
 
