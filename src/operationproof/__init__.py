@@ -33,6 +33,7 @@ from .trust import (
 from .verifier import VerificationResult, verify_proof
 
 __all__ = [
+    "SDK_CONTRACT",
     "EvidenceEnvelope",
     "ExecutionEffect",
     "ExecutionOutcome",
@@ -44,7 +45,6 @@ __all__ = [
     "ProofDecision",
     "ProofDocumentError",
     "ProviderTrustRegistry",
-    "SDK_CONTRACT",
     "SubjectBindingError",
     "TrustVerificationContext",
     "TrustVerificationResult",
