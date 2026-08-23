@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -16,6 +17,7 @@ _ONE_TIME_USE = "ONE_TIME"
 _MAX_GRANT_TTL_SECONDS = 300
 _MAX_PRECONDITION_TO_GRANT_SECONDS = 30
 _PRECONDITION_CLASSES = {"READ_THEN_COMPARE", "ATOMIC_PROVIDER_CONDITION"}
+
 _NATIVE_DIGEST_FIELDS = frozenset(
     {
         "authorization_snapshot_digest",
@@ -38,6 +40,7 @@ _NATIVE_DIGEST_FIELDS = frozenset(
         "grant_digest",
     }
 )
+
 _GRANT_FIELDS = frozenset(
     {
         "schema_version",
@@ -83,6 +86,7 @@ _GRANT_FIELDS = frozenset(
         "grant_digest",
     }
 )
+
 _TEXT_FIELDS = frozenset(
     {
         "grant_id",
@@ -101,6 +105,7 @@ _TEXT_FIELDS = frozenset(
         "issuer_revision",
     }
 )
+
 _EVIDENCE_FIELDS = frozenset(
     {
         "schema",
@@ -116,6 +121,7 @@ _EVIDENCE_FIELDS = frozenset(
         "metadata",
     }
 )
+
 _METADATA_FIELDS = frozenset(
     {
         "adapter",
@@ -143,6 +149,18 @@ class VOneAuthorizationError(ValueError):
 GrantVerifier = Callable[[Mapping[str, Any]], bool]
 GrantResolver = Callable[[str], Mapping[str, Any] | None]
 Clock = Callable[[], datetime]
+
+
+def _snapshot_document(document: Mapping[str, Any], code: str) -> dict[str, Any]:
+    """Detach mutable provider input before crossing an external verifier boundary."""
+
+    try:
+        snapshot = json.loads(canonical_json_bytes(dict(document)).decode("utf-8"))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise VOneAuthorizationError(code) from exc
+    if not isinstance(snapshot, dict):
+        raise VOneAuthorizationError(code)
+    return snapshot
 
 
 def _require_text(value: object, code: str) -> str:
@@ -212,6 +230,8 @@ def _validate_grant(
     for field in _NATIVE_DIGEST_FIELDS:
         _require_native_digest(grant.get(field), f"INVALID_VONE_GRANT_DIGEST:{field}")
 
+    # R5 profile rule: when V-One is the authorization provider, the OperationProof
+    # operation identity is the exact V-One execution identity. No alias/fallback mapping.
     if grant.get("execution_id") != operation_id:
         raise VOneAuthorizationError("VONE_EXECUTION_ID_MISMATCH")
     if grant.get("required_permission") != _REQUIRED_PERMISSION:
@@ -231,6 +251,8 @@ def _validate_grant(
     )
     issued = _parse_vone_timestamp(grant.get("issued_at"), "INVALID_VONE_ISSUED_AT")
     expires = _parse_vone_timestamp(grant.get("expires_at"), "INVALID_VONE_EXPIRES_AT")
+    now_utc = _validate_now(now)
+
     if issued < checked:
         raise VOneAuthorizationError("VONE_GRANT_PREDATES_PRECONDITION")
     if expires <= issued:
@@ -239,7 +261,9 @@ def _validate_grant(
         raise VOneAuthorizationError("VONE_GRANT_TTL_EXCEEDED")
     if (issued - checked).total_seconds() > _MAX_PRECONDITION_TO_GRANT_SECONDS:
         raise VOneAuthorizationError("VONE_PRECONDITION_TOO_OLD")
-    if expires <= _validate_now(now):
+    if issued > now_utc:
+        raise VOneAuthorizationError("VONE_GRANT_NOT_YET_VALID")
+    if expires <= now_utc:
         raise VOneAuthorizationError("EXPIRED_VONE_GRANT")
 
     grant_digest = str(grant.get("grant_digest"))
@@ -328,23 +352,28 @@ class VOneExecutionGrantAdapter:
             raise VOneAuthorizationError("INVALID_VONE_GRANT")
         if not callable(grant_verifier):
             raise VOneAuthorizationError("INVALID_VONE_GRANT_VERIFIER")
-        now_value = now or datetime.now(UTC)
 
+        # All validation and normalization use an adapter-owned snapshot. The external
+        # verifier receives another detached copy, so callback/closure mutation cannot
+        # change the evidence that was structurally validated.
+        grant_snapshot = _snapshot_document(grant, "INVALID_VONE_GRANT")
+        now_value = now or datetime.now(UTC)
         issued, expires, grant_document_digest = _validate_grant(
-            grant=grant,
+            grant=grant_snapshot,
             operation_id=operation_id,
             now=now_value,
         )
         try:
-            trusted = grant_verifier(grant)
-        except Exception as exc:  # fail closed across external authority failures
+            verifier_grant = _snapshot_document(grant_snapshot, "INVALID_VONE_GRANT")
+            trusted = grant_verifier(verifier_grant)
+        except Exception as exc:
             raise VOneAuthorizationError("VONE_GRANT_VERIFICATION_ERROR") from exc
         if trusted is not True:
             raise VOneAuthorizationError("UNTRUSTED_VONE_GRANT")
 
         return _evidence_from_grant(
             operation_id=operation_id,
-            grant=grant,
+            grant=grant_snapshot,
             issued=issued,
             expires=expires,
             grant_document_digest=grant_document_digest,
