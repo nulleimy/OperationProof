@@ -8,6 +8,35 @@ from .canonical import proof_payload, sha256_digest, valid_digest
 from .domain import PRE_LAYERS, Layer, ProofDecision
 from .rfc3339 import ParsedTimestamp, compare_timestamps, parse_rfc3339, timestamp_from_datetime
 
+_PROOF_FIELDS = frozenset(
+    {
+        "schema",
+        "phase",
+        "operation_id",
+        "decision",
+        "reason_codes",
+        "pre_proof_digest",
+        "pre_proof",
+        "evidence",
+        "proof_digest",
+    }
+)
+_EVIDENCE_FIELDS = frozenset(
+    {
+        "schema",
+        "layer",
+        "provider",
+        "operation_id",
+        "decision",
+        "verdict",
+        "subject_digest",
+        "evidence_digest",
+        "issued_at",
+        "expires_at",
+        "metadata",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class VerificationResult:
@@ -17,6 +46,15 @@ class VerificationResult:
 
 def _parse_time(value: str) -> ParsedTimestamp:
     return parse_rfc3339(value)
+
+
+def _unexpected_evidence_fields(item: dict[str, Any], *, index: int) -> str | None:
+    unexpected_fields = sorted(set(item) - _EVIDENCE_FIELDS)
+    if not unexpected_fields:
+        return None
+    layer = item.get("layer")
+    layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
+    return f"UNEXPECTED_EVIDENCE_FIELDS:{layer_name}:" + ",".join(unexpected_fields)
 
 
 def _validate_evidence_envelope(
@@ -31,6 +69,10 @@ def _validate_evidence_envelope(
     reasons: list[str] = []
     layer = item.get("layer")
     layer_name = layer if isinstance(layer, str) and layer else f"<invalid:{index}>"
+
+    unexpected_reason = _unexpected_evidence_fields(item, index=index)
+    if unexpected_reason is not None:
+        reasons.append(unexpected_reason)
 
     if item.get("schema") != "operationproof.evidence-envelope.v1":
         reasons.append(f"UNSUPPORTED_EVIDENCE_SCHEMA:{layer_name}")
@@ -205,6 +247,11 @@ def _record_matches(
 
 def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     integrity: list[str] = []
+
+    unexpected_fields = sorted(set(proof) - _PROOF_FIELDS)
+    if unexpected_fields:
+        integrity.append("UNEXPECTED_PROOF_FIELDS:" + ",".join(unexpected_fields))
+
     supplied_digest = proof.get("proof_digest")
     if not valid_digest(str(supplied_digest or "")):
         integrity.append("INVALID_PROOF_DIGEST_FORMAT")
@@ -223,6 +270,12 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
     if not isinstance(evidence, list):
         integrity.append("INVALID_EVIDENCE")
         evidence = []
+    else:
+        for index, item in enumerate(evidence):
+            if isinstance(item, dict):
+                unexpected_reason = _unexpected_evidence_fields(item, index=index)
+                if unexpected_reason is not None:
+                    integrity.append(unexpected_reason)
 
     semantic_reasons: list[str] = []
     if phase == "PRE" and isinstance(operation_id, str):
@@ -233,9 +286,17 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
         decision, semantic_reasons = evaluate_pre_semantics(operation_id, evidence)
         expected_decision = decision.value
     elif phase == "FINAL":
+        pre_proof = proof.get("pre_proof")
+        if isinstance(pre_proof, dict):
+            pre_integrity = verify_proof(pre_proof)
+            if not pre_integrity.valid:
+                integrity.append("PRE_PROOF_INTEGRITY_INVALID")
+                integrity.extend(
+                    f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
+                )
         decision, semantic_reasons = evaluate_final_semantics(
             operation_id=operation_id,
-            pre_proof=proof.get("pre_proof"),
+            pre_proof=pre_proof,
             pre_digest=proof.get("pre_proof_digest"),
             evidence=evidence,
         )
