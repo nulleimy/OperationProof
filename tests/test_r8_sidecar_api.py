@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from operationproof.builder import build_pre_proof
@@ -54,7 +56,12 @@ def registry() -> ProviderTrustRegistry:
     return result
 
 
-def client(*, trusted: bool = True, require_trust: bool = True, max_body_bytes: int = 1024 * 1024) -> TestClient:
+def client(
+    *,
+    trusted: bool = True,
+    require_trust: bool = True,
+    max_body_bytes: int = 1024 * 1024,
+) -> TestClient:
     return TestClient(
         create_app(
             registry() if trusted else None,
@@ -103,6 +110,36 @@ def test_trusted_assessment_can_accept_verified_proof() -> None:
     assert payload["contract"] == "operationproof.sidecar.v1"
     assert payload["assessment"]["accepted"] is True
     assert payload["assessment"]["trusted"] is True
+
+
+def test_provider_verifiers_do_not_run_on_event_loop() -> None:
+    trusted_registry = ProviderTrustRegistry()
+
+    def off_loop_verifier(_envelope: object, _context: object) -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+        return False
+
+    for layer in PRE_LAYERS:
+        trusted_registry.register(
+            layer=layer,
+            provider=f"sidecar:{layer.value}",
+            verifier=off_loop_verifier,
+        )
+
+    response = TestClient(
+        create_app(trusted_registry),
+        raise_server_exceptions=False,
+    ).post(
+        "/v1/assess",
+        content=canonical_json_bytes(proof()),
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assessment"]["accepted"] is True
 
 
 def test_integrity_only_assessment_never_implicitly_accepts() -> None:
@@ -154,7 +191,11 @@ def test_body_size_is_bounded_before_json_assessment() -> None:
 
 
 def test_content_type_and_encoding_are_narrow() -> None:
-    wrong_type = client().post("/v1/assess", content=b"{}", headers={"content-type": "text/plain"})
+    wrong_type = client().post(
+        "/v1/assess",
+        content=b"{}",
+        headers={"content-type": "text/plain"},
+    )
     encoded = client().post(
         "/v1/assess",
         content=b"{}",
