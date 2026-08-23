@@ -11,6 +11,7 @@ from .trust import ProviderTrustRegistry, verify_proof_trust
 from .verifier import verify_proof
 
 SDK_CONTRACT = "operationproof.sdk.v1"
+_MAX_PROOF_DOCUMENT_DEPTH = 64
 
 
 class ProofDocumentError(ValueError):
@@ -30,8 +31,26 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _validate_document_depth(value: object) -> None:
+    """Bound attacker-controlled container nesting without recursive traversal."""
+
+    stack: list[tuple[object, int]] = [(value, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > _MAX_PROOF_DOCUMENT_DEPTH:
+            raise ProofDocumentError("PROOF_DOCUMENT_DEPTH_EXCEEDED")
+        if isinstance(current, Mapping):
+            try:
+                children = current.values()
+            except Exception as exc:
+                raise ProofDocumentError("INVALID_PROOF_DOCUMENT") from exc
+            stack.extend((item, depth + 1) for item in children)
+        elif isinstance(current, (list, tuple)):
+            stack.extend((item, depth + 1) for item in current)
+
+
 def parse_proof_json(data: str | bytes | bytearray) -> dict[str, Any]:
-    """Parse one proof JSON document without duplicate-key or NaN ambiguity."""
+    """Parse one proof JSON document without duplicate-key, NaN, or depth ambiguity."""
 
     if isinstance(data, (bytes, bytearray)):
         try:
@@ -51,11 +70,14 @@ def parse_proof_json(data: str | bytes | bytearray) -> dict[str, Any]:
         )
     except ProofDocumentError:
         raise
+    except RecursionError as exc:
+        raise ProofDocumentError("PROOF_DOCUMENT_DEPTH_EXCEEDED") from exc
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise ProofDocumentError("INVALID_PROOF_JSON") from exc
 
     if not isinstance(parsed, dict):
         raise ProofDocumentError("PROOF_DOCUMENT_MUST_BE_OBJECT")
+    _validate_document_depth(parsed)
     return parsed
 
 
@@ -64,8 +86,11 @@ def canonical_proof_json(proof: Mapping[str, Any]) -> str:
 
     if not isinstance(proof, Mapping):
         raise ProofDocumentError("PROOF_DOCUMENT_MUST_BE_OBJECT")
+    _validate_document_depth(proof)
     try:
         return canonical_json_bytes(dict(proof)).decode("utf-8")
+    except RecursionError as exc:
+        raise ProofDocumentError("PROOF_DOCUMENT_DEPTH_EXCEEDED") from exc
     except (TypeError, ValueError, OverflowError) as exc:
         raise ProofDocumentError("INVALID_PROOF_DOCUMENT") from exc
 
@@ -131,14 +156,28 @@ def _invalid_assessment(code: str) -> ProofAssessment:
 
 
 def _snapshot_proof(proof: Mapping[str, Any]) -> dict[str, Any]:
+    _validate_document_depth(proof)
     try:
         payload = canonical_json_bytes(dict(proof))
         snapshot = json.loads(payload.decode("utf-8"))
+    except RecursionError as exc:
+        raise ProofDocumentError("PROOF_DOCUMENT_DEPTH_EXCEEDED") from exc
     except (TypeError, ValueError, OverflowError, json.JSONDecodeError) as exc:
         raise ProofDocumentError("INVALID_PROOF_DOCUMENT") from exc
     if not isinstance(snapshot, dict):
         raise ProofDocumentError("PROOF_DOCUMENT_MUST_BE_OBJECT")
     return snapshot
+
+
+def _preflight_proof_shape(proof: Mapping[str, Any]) -> str | None:
+    """Reject structurally impossible recursive proof chains before core verification."""
+
+    if proof.get("phase") != "FINAL":
+        return None
+    pre_proof = proof.get("pre_proof")
+    if isinstance(pre_proof, Mapping) and pre_proof.get("phase") == "FINAL":
+        return "NESTED_FINAL_PRE_PROOF_FORBIDDEN"
+    return None
 
 
 def assess_proof(
@@ -160,7 +199,14 @@ def assess_proof(
     except ProofDocumentError as exc:
         return _invalid_assessment(str(exc))
 
-    integrity = verify_proof(snapshot)
+    shape_error = _preflight_proof_shape(snapshot)
+    if shape_error is not None:
+        return _invalid_assessment(shape_error)
+
+    try:
+        integrity = verify_proof(snapshot)
+    except RecursionError:
+        return _invalid_assessment("PROOF_VERIFICATION_DEPTH_EXCEEDED")
     decision = _field(snapshot.get("decision"))
     schema = _field(snapshot.get("schema"))
     phase = _field(snapshot.get("phase"))
