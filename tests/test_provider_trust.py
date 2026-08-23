@@ -144,16 +144,62 @@ def test_final_proof_recursively_requires_pre_and_execution_provider_trust() -> 
     assert "UNREGISTERED_PROVIDER:execution:test:execution" in result.reason_codes
 
 
-def test_final_cannot_change_context_used_to_trust_embedded_pre() -> None:
+def test_final_embedded_pre_uses_exact_pre_trust_context() -> None:
     pre_items = [evidence(layer) for layer in PRE_LAYERS]
     execution = evidence(Layer.EXECUTION)
     pre = build_pre_proof("op-1", pre_items)
     final = build_final_proof(pre, execution)
 
-    overrides: dict[tuple[str, str], object] = {
-        (item.layer.value, item.provider): (
-            lambda envelope, context: getattr(context, "root_phase", None) == "FINAL"
+    observed: list[object] = []
+
+    def pre_context_verifier(envelope: object, context: object) -> bool:
+        observed.append(context)
+        return (
+            getattr(context, "root_phase", None) == "PRE"
+            and getattr(context, "evidence_phase", None) == "PRE"
+            and getattr(context, "operation_id", None) == "op-1"
+            and getattr(context, "proof_digest", None) == pre["proof_digest"]
+            and getattr(context, "pre_proof_digest", None) is None
         )
+
+    overrides: dict[tuple[str, str], object] = {
+        (item.layer.value, item.provider): pre_context_verifier for item in pre_items
+    }
+    registry = registry_for(pre_items + [execution], overrides=overrides)
+
+    result = verify_proof_trust(final, registry)
+    assert result.trusted is True
+    assert len(observed) == len(pre_items)
+    assert all(getattr(context, "root_phase", None) == "PRE" for context in observed)
+    assert all(getattr(context, "evidence_phase", None) == "PRE" for context in observed)
+    assert all(getattr(context, "operation_id", None) == "op-1" for context in observed)
+    assert all(
+        getattr(context, "proof_digest", None) == pre["proof_digest"]
+        for context in observed
+    )
+    assert all(getattr(context, "pre_proof_digest", None) is None for context in observed)
+    assert all(
+        getattr(context, "proof_digest", None) != final["proof_digest"]
+        for context in observed
+    )
+
+
+def test_final_cannot_launder_pre_trust_through_outer_final_digest() -> None:
+    pre_items = [evidence(layer) for layer in PRE_LAYERS]
+    execution = evidence(Layer.EXECUTION)
+    pre = build_pre_proof("op-1", pre_items)
+    final = build_final_proof(pre, execution)
+
+    def accepts_only_outer_final_context(envelope: object, context: object) -> bool:
+        return (
+            getattr(context, "root_phase", None) == "FINAL"
+            and getattr(context, "evidence_phase", None) == "FINAL"
+            and getattr(context, "proof_digest", None) == final["proof_digest"]
+            and getattr(context, "pre_proof_digest", None) == pre["proof_digest"]
+        )
+
+    overrides: dict[tuple[str, str], object] = {
+        (item.layer.value, item.provider): accepts_only_outer_final_context
         for item in pre_items
     }
     registry = registry_for(pre_items + [execution], overrides=overrides)
