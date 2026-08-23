@@ -6,12 +6,14 @@ import pytest
 
 from operationproof.adapters.caser import _parse_timestamp as parse_caser_timestamp
 from operationproof.canonical import sha256_digest
+from operationproof.domain import EvidenceEnvelope, Layer, ProofDecision, Verdict
 from operationproof.execution import execution_receipt_payload, verify_execution_receipt
 from operationproof.rfc3339 import (
     compare_timestamps,
     parse_rfc3339,
     timestamp_from_datetime,
 )
+from operationproof.verifier import evaluate_evidence_set
 
 
 def _receipt(*, issued_at: str, expires_at: str | None) -> dict[str, object]:
@@ -34,6 +36,21 @@ def _receipt(*, issued_at: str, expires_at: str | None) -> dict[str, object]:
     }
     receipt["receipt_digest"] = sha256_digest(execution_receipt_payload(receipt))
     return receipt
+
+
+def _execution_envelope(*, issued_at: str, expires_at: str) -> dict[str, object]:
+    return EvidenceEnvelope(
+        layer=Layer.EXECUTION,
+        provider="caser",
+        operation_id="op-r4-1-envelope",
+        decision="EXECUTION_VERIFIED",
+        verdict=Verdict.PASS,
+        subject_digest=sha256_digest({"subject": "r4.1"}),
+        evidence_digest=sha256_digest({"evidence": "r4.1"}),
+        issued_at=issued_at,
+        expires_at=expires_at,
+        metadata={"adapter": "regression"},
+    ).to_dict()
 
 
 def test_lowercase_rfc3339_designators_are_schema_compatible() -> None:
@@ -152,6 +169,18 @@ def test_unknown_negative_zero_offset_is_not_treated_as_exact_utc() -> None:
         parse_rfc3339("2026-08-23T00:00:00-00:00")
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "0001-01-01T00:00:00+00:01",
+        "9999-12-31T23:59:59-00:01",
+    ],
+)
+def test_utc_normalization_overflow_becomes_validation_failure(value: str) -> None:
+    with pytest.raises(ValueError, match="UTC-normalized"):
+        parse_rfc3339(value)
+
+
 def test_datetime_and_rfc3339_share_post_leap_time_scale() -> None:
     text = parse_rfc3339("2026-08-23T00:00:00.123456Z")
     native = timestamp_from_datetime(datetime(2026, 8, 23, 0, 0, 0, 123456, tzinfo=UTC))
@@ -172,3 +201,39 @@ def test_execution_receipt_rejects_expiry_inside_leap_second_before_next_minute_
 
     assert result.valid is False
     assert "INVALID_EXECUTION_RECEIPT_EXPIRY_ORDER" in result.reason_codes
+
+
+def test_evidence_verifier_accepts_exact_submicrosecond_window() -> None:
+    envelope = _execution_envelope(
+        issued_at="2026-08-23T00:00:00.0000001Z",
+        expires_at="2026-08-23T00:00:00.0000009Z",
+    )
+
+    decision, reasons = evaluate_evidence_set(
+        operation_id="op-r4-1-envelope",
+        evidence=[envelope],
+        required_layers={Layer.EXECUTION.value},
+        allowed_layers={Layer.EXECUTION.value},
+        now=datetime(2026, 8, 22, tzinfo=UTC),
+    )
+
+    assert decision == ProofDecision.VERIFIED
+    assert reasons == []
+
+
+def test_evidence_verifier_accepts_leap_second_to_following_minute_window() -> None:
+    envelope = _execution_envelope(
+        issued_at="2016-12-31T23:59:60.9Z",
+        expires_at="2017-01-01T00:00:00.5Z",
+    )
+
+    decision, reasons = evaluate_evidence_set(
+        operation_id="op-r4-1-envelope",
+        evidence=[envelope],
+        required_layers={Layer.EXECUTION.value},
+        allowed_layers={Layer.EXECUTION.value},
+        now=datetime(2016, 12, 31, 23, 59, 59, tzinfo=UTC),
+    )
+
+    assert decision == ProofDecision.VERIFIED
+    assert reasons == []
