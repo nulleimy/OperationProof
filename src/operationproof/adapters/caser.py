@@ -12,6 +12,7 @@ from ..verifier import verify_proof
 _CASER_RECEIPT_SCHEMA = "execution-receipt/v1"
 _CASER_VERIFICATION_SCHEMA = "verification-result/v1"
 _BINDING_SCHEMA = "operationproof.caser-execution-binding.v1"
+_INTEGRITY_ONLY_SCOPE = "EXECUTION_EVIDENCE_INTEGRITY"
 
 
 class CaserExecutionError(ValueError):
@@ -51,10 +52,13 @@ def _check(verification: Mapping[str, Any], name: str) -> Mapping[str, Any] | No
     checks = verification.get("checks")
     if not isinstance(checks, list):
         raise CaserExecutionError("INVALID_CASER_VERIFICATION_CHECKS")
+    match: Mapping[str, Any] | None = None
     for item in checks:
         if isinstance(item, Mapping) and item.get("check") == name:
-            return item
-    return None
+            if match is not None:
+                raise CaserExecutionError(f"DUPLICATE_CASER_VERIFICATION_CHECK:{name}")
+            match = item
+    return match
 
 
 def _require_pass_check(verification: Mapping[str, Any], name: str) -> Mapping[str, Any]:
@@ -66,20 +70,26 @@ def _require_pass_check(verification: Mapping[str, Any], name: str) -> Mapping[s
 
 def _verified_effect(verification: Mapping[str, Any]) -> ExecutionEffect:
     read_only = _check(verification, "read-only-effect")
-    if (
+    read_only_verified = (
         read_only is not None
         and read_only.get("status") == "PASS"
         and read_only.get("observed") == "READ_ONLY"
-    ):
-        return ExecutionEffect.READ_ONLY
+    )
 
     effect = _check(verification, "effect-class")
+    effect_value: ExecutionEffect | None = None
     if effect is not None and effect.get("status") == "PASS":
         observed = effect.get("observed")
-        if observed == ExecutionEffect.MUTATING.value:
-            return ExecutionEffect.MUTATING
-        if observed == ExecutionEffect.READ_ONLY.value:
-            return ExecutionEffect.READ_ONLY
+        if observed not in {item.value for item in ExecutionEffect}:
+            raise CaserExecutionError("INVALID_VERIFIED_CASER_EFFECT")
+        effect_value = ExecutionEffect(observed)
+
+    if read_only_verified and effect_value not in {None, ExecutionEffect.READ_ONLY}:
+        raise CaserExecutionError("CONFLICTING_CASER_EFFECT_CHECKS")
+    if read_only_verified:
+        return ExecutionEffect.READ_ONLY
+    if effect_value is not None:
+        return effect_value
     return ExecutionEffect.UNKNOWN
 
 
@@ -107,6 +117,8 @@ def _verified_outcome(
         return ExecutionOutcome.UNKNOWN
     if verification.get("runnerIndependent") is not True:
         raise CaserExecutionError("CASER_OUTCOME_NOT_RUNNER_INDEPENDENT")
+    if verification.get("verificationScope") == _INTEGRITY_ONLY_SCOPE:
+        raise CaserExecutionError("CASER_OUTCOME_OUTSIDE_VERIFICATION_SCOPE")
 
     native_outcome = verification.get("executionOutcome")
     if native_outcome not in {
@@ -172,10 +184,22 @@ class CaserExecutionAdapter:
             raise CaserExecutionError("INVALID_CASER_VERIFICATION")
         if verification.get("schemaVersion") != _CASER_VERIFICATION_SCHEMA:
             raise CaserExecutionError("INVALID_CASER_VERIFICATION_SCHEMA")
+        for field_name in (
+            "verifierIdentity",
+            "verificationStrength",
+            "verificationClass",
+            "verificationScope",
+        ):
+            value = verification.get(field_name)
+            if not isinstance(value, str) or not value:
+                raise CaserExecutionError(f"INVALID_CASER_VERIFICATION_FIELD:{field_name}")
         verification_digest = verification.get("contentIdentity")
         if not isinstance(verification_digest, str) or not valid_digest(verification_digest):
             raise CaserExecutionError("INVALID_CASER_VERIFICATION_CONTENT_IDENTITY")
-        _parse_timestamp(verification.get("verifiedAt"), "INVALID_CASER_VERIFIED_AT")
+        verified_at = _parse_timestamp(
+            verification.get("verifiedAt"),
+            "INVALID_CASER_VERIFIED_AT",
+        )
 
         verification_status = verification.get("status")
         if verification_status not in {"PASS", "FAIL"}:
@@ -231,6 +255,8 @@ class CaserExecutionAdapter:
         expires_at = binding.get("expires_at")
         issued = _parse_timestamp(issued_at, "INVALID_CASER_BINDING_ISSUED_AT")
         expires = _parse_timestamp(expires_at, "INVALID_CASER_BINDING_EXPIRES_AT")
+        if issued < verified_at:
+            raise CaserExecutionError("CASER_BINDING_PREDATES_VERIFICATION")
         if expires <= issued:
             raise CaserExecutionError("INVALID_CASER_BINDING_TIME_WINDOW")
         if expires <= datetime.now(UTC):
