@@ -39,6 +39,16 @@ def _gh_json(endpoint: str) -> dict[str, Any]:
     return value
 
 
+def _repository_owner_type(repository: dict[str, Any]) -> str:
+    owner = repository.get("owner")
+    if not isinstance(owner, dict):
+        raise GovernanceVerificationError("repository owner is missing")
+    owner_type = owner.get("type")
+    if owner_type not in {"User", "Organization"}:
+        raise GovernanceVerificationError("repository owner type is invalid")
+    return owner_type
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Verify OperationProof GitHub governance")
     parser.add_argument("--repo", required=True, help="owner/repository")
@@ -61,10 +71,16 @@ def main() -> int:
         raise SystemExit("GOVERNANCE_VERIFY_ERROR: policy branch is invalid")
 
     try:
+        repository_document = _gh_json(f"repos/{args.repo}")
+        repository_owner_type = _repository_owner_type(repository_document)
         branch_document = _gh_json(f"repos/{args.repo}/branches/{branch}")
         protection_document = _gh_json(f"repos/{args.repo}/branches/{branch}/protection")
         branch_reasons = verify_branch_summary(branch_document, policy)
-        protection_reasons = verify_protection_document(protection_document, policy)
+        protection_reasons = verify_protection_document(
+            protection_document,
+            policy,
+            repository_owner_type=repository_owner_type,
+        )
     except GovernanceVerificationError as exc:
         raise SystemExit(f"GOVERNANCE_VERIFY_ERROR: {exc}") from exc
 
@@ -72,6 +88,7 @@ def main() -> int:
     report = {
         "schema": "operationproof.repository-governance-verification.v1",
         "repo": args.repo,
+        "repository_owner_type": repository_owner_type,
         "branch": branch,
         "verified": not reasons,
         "reason_codes": list(reasons),
