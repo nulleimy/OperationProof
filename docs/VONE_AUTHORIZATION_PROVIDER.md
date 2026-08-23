@@ -8,6 +8,18 @@ The R5 adapter consumes V-One `execution-grant/v2` as authorization evidence for
 
 `AuthorizationSnapshot` alone is intentionally insufficient for a PASS. V-One documents the snapshot as immutable authorization evidence rather than an irrevocable bearer permission, and authoritative grant issuance re-checks live permission and deny gates. The grant therefore supplies the current, narrowed, short-lived authority artifact.
 
+A `v-one-policy-decision/v1` outcome of `allow` is also insufficient for OperationProof authorization PASS. Policy evaluation is an input to V-One authority; it is not the final execution authority artifact.
+
+## Exact operation binding
+
+R5 defines one explicit provider profile rule:
+
+```text
+OperationProof operation_id == V-One execution-grant/v2 execution_id
+```
+
+There is no alias, fallback, or caller-selected translation table in R5. A deployment that needs a different identity mapping requires a separately reviewed binding protocol rather than weakening this equality rule.
+
 ## Required bindings
 
 The adapter requires:
@@ -21,12 +33,26 @@ The adapter requires:
 - canonical UTC millisecond timestamps
 - positive grant TTL no longer than 300 seconds
 - precondition witness no more than 30 seconds before grant issuance
-- grant not expired at verification time
+- `issued_at <= verification time < expires_at`
 - valid provider-native lowercase 64-hex SHA-256 fields
 - exact recomputation of V-One `grant_digest`
 - an external trusted grant verifier returning true
 
 The adapter computes an additional OperationProof-local `sha256:` digest over the complete grant document. The V-One native digest remains provider evidence; neither digest is an authenticity root by itself.
+
+## Mutation / TOCTOU boundary
+
+Provider documents are caller-owned mutable mappings. R5 deep-snapshots the complete grant through canonical JSON before validation and normalization.
+
+The external grant verifier receives a separate detached copy. Mutation by the verifier callback, or mutation of the caller-owned grant through a closure while the verifier runs, cannot change the already validated adapter-owned snapshot.
+
+This preserves the invariant:
+
+```text
+exact grant validated
+== exact grant normalized
+== exact grant represented by grant_document_digest
+```
 
 ## Evidence mapping
 
@@ -60,4 +86,6 @@ Resolver configuration and the external grant verifier are deployment trust root
 
 The external V-One grant verifier must authenticate and live-revalidate the provider artifact according to deployment policy. That includes any V-One state not self-authenticating from the serialized grant, such as current revocation/consumption/issuer authority where applicable.
 
-OperationProof does not issue, revoke, consume, or refresh V-One grants.
+A native `grant_digest` is content integrity, not issuer authenticity. If the deployment uses V-One signed grant envelopes or another authenticated issuer boundary, signature/key/trust-policy verification belongs inside this external verifier.
+
+OperationProof does not issue, revoke, consume, refresh, or broaden V-One grants.
