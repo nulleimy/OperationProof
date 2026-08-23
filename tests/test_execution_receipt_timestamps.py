@@ -67,6 +67,37 @@ def test_valid_rfc3339_offset_timestamps_are_accepted() -> None:
     _adapt(receipt, pre_proof_digest)
 
 
+def test_valid_lowercase_rfc3339_designators_are_accepted() -> None:
+    pre_proof_digest = sha256_digest({"pre": "lowercase-rfc3339"})
+    receipt = _receipt(pre_proof_digest=pre_proof_digest)
+    receipt["started_at"] = "2026-08-23t00:00:00z"
+    receipt["completed_at"] = "2026-08-23t00:00:01z"
+    receipt["receipt_digest"] = sha256_digest(_receipt_payload(receipt))
+
+    _adapt(receipt, pre_proof_digest)
+
+
+def test_fractional_precision_beyond_microseconds_is_preserved_for_window_check() -> None:
+    pre_proof_digest = sha256_digest({"pre": "sub-microsecond-order"})
+    receipt = _receipt(pre_proof_digest=pre_proof_digest)
+    receipt["started_at"] = "2026-08-23T00:00:00.0000009Z"
+    receipt["completed_at"] = "2026-08-23T00:00:00.0000001Z"
+    receipt["receipt_digest"] = sha256_digest(_receipt_payload(receipt))
+
+    with pytest.raises(ExecutionReceiptError, match="INVALID_EXECUTION_TIME_WINDOW"):
+        _adapt(receipt, pre_proof_digest)
+
+
+def test_fractional_precision_beyond_microseconds_accepts_correct_order() -> None:
+    pre_proof_digest = sha256_digest({"pre": "sub-microsecond-valid"})
+    receipt = _receipt(pre_proof_digest=pre_proof_digest)
+    receipt["started_at"] = "2026-08-23T00:00:00.0000001Z"
+    receipt["completed_at"] = "2026-08-23T00:00:00.0000009Z"
+    receipt["receipt_digest"] = sha256_digest(_receipt_payload(receipt))
+
+    _adapt(receipt, pre_proof_digest)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "error_code"),
     [
