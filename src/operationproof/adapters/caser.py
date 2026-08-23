@@ -369,7 +369,7 @@ class CaserExecutionAdapter:
         try:
             verifier_binding = _snapshot_document(binding, "INVALID_CASER_EXECUTION_BINDING")
             trusted_binding = binding_verifier(verifier_binding)
-        except Exception as exc:  # noqa: BLE001 - provider boundary must fail closed
+        except Exception as exc:
             raise CaserExecutionError("CASER_BINDING_VERIFICATION_ERROR") from exc
         if trusted_binding is not True:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
