@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -237,3 +237,45 @@ def test_evidence_verifier_accepts_leap_second_to_following_minute_window() -> N
 
     assert decision == ProofDecision.VERIFIED
     assert reasons == []
+
+
+def test_execution_receipt_invalid_now_overflow_fails_closed() -> None:
+    receipt = _receipt(
+        issued_at="2026-08-23T00:00:00Z",
+        expires_at=None,
+    )
+    invalid_now = datetime(
+        1,
+        1,
+        1,
+        tzinfo=timezone(timedelta(minutes=1)),
+    )
+
+    result = verify_execution_receipt(receipt, now=invalid_now)
+
+    assert result.valid is False
+    assert "INVALID_EXECUTION_RECEIPT_NOW" in result.reason_codes
+
+
+def test_evidence_verifier_invalid_now_overflow_fails_closed() -> None:
+    envelope = _execution_envelope(
+        issued_at="2026-08-23T00:00:00Z",
+        expires_at="2026-08-23T00:00:01Z",
+    )
+    invalid_now = datetime(
+        1,
+        1,
+        1,
+        tzinfo=timezone(timedelta(minutes=1)),
+    )
+
+    decision, reasons = evaluate_evidence_set(
+        operation_id="op-r4-1-envelope",
+        evidence=[envelope],
+        required_layers={Layer.EXECUTION.value},
+        allowed_layers={Layer.EXECUTION.value},
+        now=invalid_now,
+    )
+
+    assert decision == ProofDecision.REJECTED
+    assert reasons == ["INVALID_VERIFICATION_NOW"]
