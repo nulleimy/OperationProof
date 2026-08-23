@@ -96,18 +96,48 @@ def test_push_restrictions_fail_closed() -> None:
         "apps": [],
     }
 
-    reasons = verify_protection_document(protection, _policy())
+    reasons = verify_protection_document(
+        protection,
+        _policy(),
+        repository_owner_type="Organization",
+    )
 
     assert reasons == ("PUSH_RESTRICTIONS_PRESENT",)
 
 
-def test_missing_push_restriction_state_fails_closed() -> None:
+def test_missing_push_restrictions_are_expected_for_user_owned_repo() -> None:
+    protection = _protection()
+    del protection["restrictions"]
+
+    reasons = verify_protection_document(
+        protection,
+        _policy(),
+        repository_owner_type="User",
+    )
+
+    assert reasons == ()
+
+
+def test_missing_push_restriction_state_fails_closed_for_organization() -> None:
+    protection = _protection()
+    del protection["restrictions"]
+
+    reasons = verify_protection_document(
+        protection,
+        _policy(),
+        repository_owner_type="Organization",
+    )
+
+    assert reasons == ("PUSH_RESTRICTIONS_STATE_MISSING",)
+
+
+def test_missing_push_restriction_state_without_owner_type_fails_closed() -> None:
     protection = _protection()
     del protection["restrictions"]
 
     reasons = verify_protection_document(protection, _policy())
 
-    assert reasons == ("PUSH_RESTRICTIONS_STATE_MISSING",)
+    assert reasons == ("REPOSITORY_OWNER_TYPE_UNKNOWN",)
 
 
 def test_check_objects_are_accepted_as_required_contexts() -> None:
