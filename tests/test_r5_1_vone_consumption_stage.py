@@ -207,6 +207,16 @@ def test_future_issued_grant_is_rejected_before_window_begins() -> None:
         )
 
 
+@pytest.mark.parametrize("schema_version", [True, 2.0])
+def test_grant_schema_version_requires_exact_integer(schema_version: object) -> None:
+    grant = _grant()
+    grant["schema_version"] = schema_version
+    _rehash(grant, "grant_digest")
+
+    with pytest.raises(VOneAuthorizationError, match="INVALID_VONE_GRANT_PROTOCOL"):
+        _authorization(grant)
+
+
 def test_direct_pre_requires_live_unused_admission_even_if_consumption_exists() -> None:
     grant = _grant()
     witness = _consumption(grant)
@@ -257,6 +267,22 @@ def test_final_fails_closed_without_authoritative_consumption_witness() -> None:
 
     assert result.trusted is False
     assert "UNTRUSTED_PROVIDER_EVIDENCE:authorization:vone" in result.reason_codes
+
+
+@pytest.mark.parametrize("schema_version", [True, 1.0])
+def test_consumption_schema_version_requires_exact_integer(schema_version: object) -> None:
+    grant = _grant()
+    witness = _consumption(grant)
+    witness["schema_version"] = schema_version
+    _rehash(witness, "witness_digest")
+    _pre, final = _proofs(grant)
+    registry = _registry(
+        grant=grant,
+        witness=witness,
+        admission_verifier=lambda _grant: True,
+    )
+
+    assert verify_proof_trust(final, registry).trusted is False
 
 
 def test_consumption_witness_must_bind_exact_grant_and_execution() -> None:
