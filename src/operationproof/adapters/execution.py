@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +12,9 @@ from ..trust import TrustVerificationContext
 _RECEIPT_SCHEMA = "operationproof.execution-receipt.v1"
 _EVIDENCE_SCHEMA = "operationproof.evidence-envelope.v1"
 _ALLOWED_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN"}
+_RFC3339_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _RECEIPT_PAYLOAD_FIELDS = (
     "schema",
     "provider",
@@ -60,12 +64,14 @@ ReceiptResolver = Callable[[str], Mapping[str, Any] | None]
 def _parse_timestamp(value: Any, code: str) -> datetime:
     if not isinstance(value, str) or not value:
         raise ExecutionReceiptError(code)
+    if _RFC3339_TIMESTAMP_RE.fullmatch(value) is None:
+        raise ExecutionReceiptError(code)
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
         raise ExecutionReceiptError(code) from exc
-    if parsed.tzinfo is None:
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ExecutionReceiptError(code)
     return parsed.astimezone(UTC)
 
