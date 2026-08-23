@@ -41,7 +41,20 @@ if assessment.accepted:
 
 Without a trust registry, the SDK reports `TRUST_NOT_EVALUATED` and `accepted=False`; it never promotes an integrity-only result into governed acceptance.
 
-For raw untrusted JSON, prefer `assess_proof_json()` / `parse_proof_json()`. The strict parser rejects duplicate keys and non-finite JSON numbers before protocol verification. See `docs/SDK.md`.
+For raw untrusted JSON, prefer `assess_proof_json()` / `parse_proof_json()`. The strict parser rejects duplicate keys, non-finite JSON numbers, and excessive nesting before protocol verification. See `docs/SDK.md`.
+
+## Sidecar quick start
+
+R8 exposes the same SDK contract through an optional local HTTP sidecar:
+
+```bash
+python -m pip install -e '.[sidecar]'
+operationproof-sidecar --trust-factory mydeployment.trust:build_registry
+```
+
+The default bind address is `127.0.0.1`. The trusted runtime refuses to start without an out-of-band `ProviderTrustRegistry` factory. `--allow-integrity-only` exists only as an explicit diagnostic mode and cannot make an untrusted proof `accepted=true`.
+
+The sidecar provides `GET /healthz`, `GET /readyz`, and `POST /v1/assess`, bounds request bodies while streaming, rejects compressed request bodies, and does not expose mutable trust configuration over HTTP. See `docs/SIDECAR_RUNTIME.md`.
 
 ## Non-goals
 
@@ -68,6 +81,8 @@ G0 enables protected `main` and required deterministic CI gates.
 R6 introduces canonical `OperationSubject`, subject-bound proof v2, downgrade protection, and externally verified native-provider-to-canonical subject bindings for HOWEDO, V-One, and CASER evidence.
 
 R7 adds the stable SDK/library contract: strict raw JSON parsing, deterministic serialization, pinned package-root exports, detached caller input, and `ProofAssessment` so integrity cannot be confused with governed acceptance.
+
+R8 adds the optional fail-closed sidecar API/runtime with trusted out-of-band registry bootstrap, loopback-only defaults, bounded HTTP input, liveness/readiness separation, and the same R7 acceptance semantics over HTTP.
 
 ## Local verification
 
