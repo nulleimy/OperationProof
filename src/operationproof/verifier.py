@@ -185,12 +185,13 @@ def evaluate_pre_semantics(
     )
 
 
-def evaluate_final_semantics(
+def _evaluate_final_semantics(
     *,
     operation_id: Any,
     pre_proof: Any,
     pre_digest: Any,
     evidence: list[Any],
+    pre_result: VerificationResult | None,
 ) -> tuple[ProofDecision, list[str]]:
     reasons: list[str] = []
 
@@ -200,8 +201,7 @@ def evaluate_final_semantics(
     if not isinstance(pre_proof, dict):
         reasons.append("PRE_PROOF_MISSING")
     else:
-        pre_result = verify_proof(pre_proof)
-        if not pre_result.valid:
+        if pre_result is None or not pre_result.valid:
             reasons.append("PRE_PROOF_INVALID")
         if pre_proof.get("phase") != "PRE":
             reasons.append("PRE_PROOF_PHASE_INVALID")
@@ -227,6 +227,23 @@ def evaluate_final_semantics(
     reasons = sorted(set(reasons))
     decision = ProofDecision.VERIFIED if not reasons else ProofDecision.REJECTED
     return decision, reasons
+
+
+def evaluate_final_semantics(
+    *,
+    operation_id: Any,
+    pre_proof: Any,
+    pre_digest: Any,
+    evidence: list[Any],
+) -> tuple[ProofDecision, list[str]]:
+    pre_result = verify_proof(pre_proof) if isinstance(pre_proof, dict) else None
+    return _evaluate_final_semantics(
+        operation_id=operation_id,
+        pre_proof=pre_proof,
+        pre_digest=pre_digest,
+        evidence=evidence,
+        pre_result=pre_result,
+    )
 
 
 def _record_matches(
@@ -287,18 +304,18 @@ def verify_proof(proof: dict[str, Any]) -> VerificationResult:
         expected_decision = decision.value
     elif phase == "FINAL":
         pre_proof = proof.get("pre_proof")
-        if isinstance(pre_proof, dict):
-            pre_integrity = verify_proof(pre_proof)
-            if not pre_integrity.valid:
-                integrity.append("PRE_PROOF_INTEGRITY_INVALID")
-                integrity.extend(
-                    f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
-                )
-        decision, semantic_reasons = evaluate_final_semantics(
+        pre_integrity = verify_proof(pre_proof) if isinstance(pre_proof, dict) else None
+        if pre_integrity is not None and not pre_integrity.valid:
+            integrity.append("PRE_PROOF_INTEGRITY_INVALID")
+            integrity.extend(
+                f"PRE_PROOF_INTEGRITY:{code}" for code in pre_integrity.reason_codes
+            )
+        decision, semantic_reasons = _evaluate_final_semantics(
             operation_id=operation_id,
             pre_proof=pre_proof,
             pre_digest=proof.get("pre_proof_digest"),
             evidence=evidence,
+            pre_result=pre_integrity,
         )
         expected_decision = decision.value
     else:
