@@ -177,6 +177,11 @@ def test_failure_scenario_returning_evidence_is_a_conformance_failure() -> None:
             scenario,
             envelope,
             "op-r9",
+            postcondition=(
+                (lambda _envelope: True)
+                if scenario is ConformanceScenario.MUTATION_ISOLATION
+                else None
+            ),
         )
         for scenario in ConformanceScenario
     )
