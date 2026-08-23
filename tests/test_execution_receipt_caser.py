@@ -62,23 +62,36 @@ def native_verification(
     ]
     if effect == "READ_ONLY":
         checks.append(
-            {"check": "read-only-effect", "status": "PASS", "observed": "READ_ONLY"}
+            {
+                "check": "read-only-effect",
+                "status": "PASS",
+                "observed": "READ_ONLY",
+            }
         )
     else:
         checks.append({"check": "effect-class", "status": "PASS", "observed": effect})
     if outcome_verified and outcome is not None:
-        checks.append({"check": "execution-outcome", "status": "PASS", "observed": outcome})
+        checks.append(
+            {"check": "execution-outcome", "status": "PASS", "observed": outcome}
+        )
     if post_state_verified:
         checks.append(
-            {"check": "provider-post-state", "status": "PASS", "observed": "VERIFIED"}
+            {
+                "check": "provider-post-state",
+                "status": "PASS",
+                "observed": "VERIFIED",
+            }
         )
 
     if post_state_verified:
-        verification_scope = "EXECUTION_OUTCOME_AND_POST_STATE"
+        verification_scope = "EXECUTION_OUTCOME_AND_PROVIDER_POST_STATE"
+        verification_class = "INDEPENDENT_PROVIDER_OBSERVATION"
     elif outcome_verified:
         verification_scope = "EXECUTION_OUTCOME"
+        verification_class = "INDEPENDENT_CODE_PATH"
     else:
         verification_scope = "EXECUTION_EVIDENCE_INTEGRITY"
+        verification_class = "INDEPENDENT_CODE_PATH"
 
     verification: dict[str, object] = {
         "schemaVersion": "verification-result/v1",
@@ -86,7 +99,7 @@ def native_verification(
         "verifierIdentity": "caser-independent-verifier/v0.1",
         "verifiedAt": "2026-08-23T00:01:00+00:00",
         "verificationStrength": "V2" if not outcome_verified else "V3",
-        "verificationClass": "INDEPENDENT_CODE_PATH",
+        "verificationClass": verification_class,
         "verificationScope": verification_scope,
         "receipt": {
             "contentIdentity": receipt["contentIdentity"],
@@ -128,6 +141,8 @@ def trusted_binding(
         "pre_proof_digest": pre["proof_digest"],
         "receipt_content_identity": receipt["contentIdentity"],
         "verification_content_identity": verification["contentIdentity"],
+        "receipt_document_digest": sha256_digest(receipt),
+        "verification_document_digest": sha256_digest(verification),
         "execution_instance_id": receipt["instanceId"],
         "issued_at": "2026-08-23T00:02:00+00:00",
         "expires_at": "2030-01-01T00:00:00+00:00",
@@ -248,10 +263,15 @@ def test_outcome_claim_without_independent_check_fails_closed() -> None:
     checks = verification["checks"]
     assert isinstance(checks, list)
     verification["checks"] = [
-        item for item in checks if isinstance(item, dict) and item.get("check") != "execution-outcome"
+        item
+        for item in checks
+        if isinstance(item, dict) and item.get("check") != "execution-outcome"
     ]
 
-    with pytest.raises(CaserExecutionError, match="CASER_REQUIRED_CHECK_NOT_PASS:execution-outcome"):
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_REQUIRED_CHECK_NOT_PASS:execution-outcome",
+    ):
         adapt(pre, receipt, verification)
 
 
@@ -287,7 +307,74 @@ def test_post_state_claim_without_independent_check_fails_closed() -> None:
         if isinstance(item, dict) and item.get("check") != "provider-post-state"
     ]
 
-    with pytest.raises(CaserExecutionError, match="CASER_REQUIRED_CHECK_NOT_PASS:provider-post-state"):
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_REQUIRED_CHECK_NOT_PASS:provider-post-state",
+    ):
+        adapt(pre, receipt, verification)
+
+
+def test_post_state_claim_requires_affirmative_observation() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+        effect="MUTATING",
+        post_state_verified=True,
+    )
+    checks = verification["checks"]
+    assert isinstance(checks, list)
+    post_state = next(
+        item
+        for item in checks
+        if isinstance(item, dict) and item.get("check") == "provider-post-state"
+    )
+    post_state["observed"] = "NOT_VERIFIED"
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_PROVIDER_POST_STATE_CHECK_MISMATCH",
+    ):
+        adapt(pre, receipt, verification)
+
+
+def test_post_state_claim_requires_provider_post_state_scope() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+        effect="MUTATING",
+        post_state_verified=True,
+    )
+    verification["verificationScope"] = "EXECUTION_OUTCOME"
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_POST_STATE_OUTSIDE_VERIFICATION_SCOPE",
+    ):
+        adapt(pre, receipt, verification)
+
+
+def test_post_state_claim_requires_provider_independent_class() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+        effect="MUTATING",
+        post_state_verified=True,
+    )
+    verification["verificationClass"] = "INDEPENDENT_CODE_PATH"
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_POST_STATE_NOT_PROVIDER_INDEPENDENT",
+    ):
         adapt(pre, receipt, verification)
 
 
@@ -307,6 +394,31 @@ def test_conflicting_read_only_and_mutating_effect_checks_fail_closed() -> None:
         adapt(pre, receipt, verification)
 
 
+def test_contradictory_read_only_observation_fails_closed() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(
+        receipt,
+        outcome_verified=True,
+        outcome="SUCCEEDED",
+    )
+    checks = verification["checks"]
+    assert isinstance(checks, list)
+    read_only = next(
+        item
+        for item in checks
+        if isinstance(item, dict) and item.get("check") == "read-only-effect"
+    )
+    read_only["observed"] = "MUTATING"
+    checks.append({"check": "effect-class", "status": "PASS", "observed": "READ_ONLY"})
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="INVALID_VERIFIED_CASER_READ_ONLY_EFFECT",
+    ):
+        adapt(pre, receipt, verification)
+
+
 def test_duplicate_security_check_fails_closed() -> None:
     pre, _ = verified_pre()
     receipt = native_receipt()
@@ -317,7 +429,30 @@ def test_duplicate_security_check_fails_closed() -> None:
         {"check": "content-identity", "status": "PASS", "observed": {"claimed": "x"}}
     )
 
-    with pytest.raises(CaserExecutionError, match="DUPLICATE_CASER_VERIFICATION_CHECK:content-identity"):
+    with pytest.raises(
+        CaserExecutionError,
+        match="DUPLICATE_CASER_VERIFICATION_CHECK:content-identity",
+    ):
+        adapt(pre, receipt, verification)
+
+
+def test_duplicate_unused_check_also_fails_closed() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(receipt)
+    checks = verification["checks"]
+    assert isinstance(checks, list)
+    checks.extend(
+        [
+            {"check": "execution-outcome", "status": "PASS", "observed": "SUCCEEDED"},
+            {"check": "execution-outcome", "status": "PASS", "observed": "SUCCEEDED"},
+        ]
+    )
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="DUPLICATE_CASER_VERIFICATION_CHECK:execution-outcome",
+    ):
         adapt(pre, receipt, verification)
 
 
@@ -328,7 +463,11 @@ def test_binding_must_match_exact_pre_proof_digest() -> None:
     binding = trusted_binding(pre, receipt, verification)
     binding["pre_proof_digest"] = sha256_digest({"wrong": "pre"})
     binding["binding_digest"] = sha256_digest(
-        {key: value for key, value in binding.items() if key not in {"binding_digest", "attestation"}}
+        {
+            key: value
+            for key, value in binding.items()
+            if key not in {"binding_digest", "attestation"}
+        }
     )
 
     with pytest.raises(CaserExecutionError, match="CASER_BINDING_MISMATCH:pre_proof_digest"):
@@ -348,10 +487,64 @@ def test_binding_cannot_predate_independent_verification() -> None:
     binding = trusted_binding(pre, receipt, verification)
     binding["issued_at"] = "2026-08-22T23:59:00+00:00"
     binding["binding_digest"] = sha256_digest(
-        {key: value for key, value in binding.items() if key not in {"binding_digest", "attestation"}}
+        {
+            key: value
+            for key, value in binding.items()
+            if key not in {"binding_digest", "attestation"}
+        }
     )
 
     with pytest.raises(CaserExecutionError, match="CASER_BINDING_PREDATES_VERIFICATION"):
+        CaserExecutionAdapter.adapt(
+            pre_proof=pre,
+            receipt=receipt,
+            verification=verification,
+            binding=binding,
+            binding_verifier=accept_binding,
+        )
+
+
+def test_verification_document_cannot_change_after_binding() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(receipt)
+    binding = trusted_binding(pre, receipt, verification)
+
+    claims = verification["claims"]
+    assert isinstance(claims, dict)
+    claims["executionOutcomeIndependentlyVerified"] = True
+    verification["executionOutcome"] = "SUCCEEDED"
+    verification["verificationScope"] = "EXECUTION_OUTCOME"
+    checks = verification["checks"]
+    assert isinstance(checks, list)
+    checks.append(
+        {"check": "execution-outcome", "status": "PASS", "observed": "SUCCEEDED"}
+    )
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_BINDING_MISMATCH:verification_document_digest",
+    ):
+        CaserExecutionAdapter.adapt(
+            pre_proof=pre,
+            receipt=receipt,
+            verification=verification,
+            binding=binding,
+            binding_verifier=accept_binding,
+        )
+
+
+def test_receipt_document_cannot_change_after_binding() -> None:
+    pre, _ = verified_pre()
+    receipt = native_receipt()
+    verification = native_verification(receipt)
+    binding = trusted_binding(pre, receipt, verification)
+    receipt["extraClaim"] = "tampered"
+
+    with pytest.raises(
+        CaserExecutionError,
+        match="CASER_BINDING_MISMATCH:receipt_document_digest",
+    ):
         CaserExecutionAdapter.adapt(
             pre_proof=pre,
             receipt=receipt,
