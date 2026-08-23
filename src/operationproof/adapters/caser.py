@@ -13,6 +13,9 @@ _CASER_RECEIPT_SCHEMA = "execution-receipt/v1"
 _CASER_VERIFICATION_SCHEMA = "verification-result/v1"
 _BINDING_SCHEMA = "operationproof.caser-execution-binding.v1"
 _INTEGRITY_ONLY_SCOPE = "EXECUTION_EVIDENCE_INTEGRITY"
+_POST_STATE_SCOPE = "EXECUTION_OUTCOME_AND_PROVIDER_POST_STATE"
+_POST_STATE_CLASS = "INDEPENDENT_PROVIDER_OBSERVATION"
+_OUTCOME_SCOPES = {"EXECUTION_OUTCOME", _POST_STATE_SCOPE}
 
 
 class CaserExecutionError(ValueError):
@@ -35,6 +38,17 @@ def _parse_timestamp(value: Any, code: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
+def _document_digest(document: Mapping[str, Any]) -> str:
+    """Bind the exact canonical document supplied to this adapter.
+
+    Native CASER contentIdentity remains a provider-owned reference. OperationProof
+    additionally computes its own canonical digest so an authenticated binding cannot
+    be reused after claims/checks are changed while a native identity is retained.
+    """
+
+    return sha256_digest(dict(document))
+
+
 def _binding_payload(binding: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema": binding.get("schema"),
@@ -42,41 +56,51 @@ def _binding_payload(binding: Mapping[str, Any]) -> dict[str, Any]:
         "pre_proof_digest": binding.get("pre_proof_digest"),
         "receipt_content_identity": binding.get("receipt_content_identity"),
         "verification_content_identity": binding.get("verification_content_identity"),
+        "receipt_document_digest": binding.get("receipt_document_digest"),
+        "verification_document_digest": binding.get("verification_document_digest"),
         "execution_instance_id": binding.get("execution_instance_id"),
         "issued_at": binding.get("issued_at"),
         "expires_at": binding.get("expires_at"),
     }
 
 
-def _check(verification: Mapping[str, Any], name: str) -> Mapping[str, Any] | None:
-    checks = verification.get("checks")
-    if not isinstance(checks, list):
+def _validated_checks(verification: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    raw_checks = verification.get("checks")
+    if not isinstance(raw_checks, list):
         raise CaserExecutionError("INVALID_CASER_VERIFICATION_CHECKS")
-    match: Mapping[str, Any] | None = None
-    for item in checks:
-        if isinstance(item, Mapping) and item.get("check") == name:
-            if match is not None:
-                raise CaserExecutionError(f"DUPLICATE_CASER_VERIFICATION_CHECK:{name}")
-            match = item
-    return match
+
+    checks: dict[str, Mapping[str, Any]] = {}
+    for index, item in enumerate(raw_checks):
+        if not isinstance(item, Mapping):
+            raise CaserExecutionError(f"INVALID_CASER_VERIFICATION_CHECK_ENTRY:{index}")
+        name = item.get("check")
+        if not isinstance(name, str) or not name:
+            raise CaserExecutionError(f"INVALID_CASER_VERIFICATION_CHECK_NAME:{index}")
+        if name in checks:
+            raise CaserExecutionError(f"DUPLICATE_CASER_VERIFICATION_CHECK:{name}")
+        checks[name] = item
+    return checks
 
 
-def _require_pass_check(verification: Mapping[str, Any], name: str) -> Mapping[str, Any]:
-    item = _check(verification, name)
+def _require_pass_check(
+    checks: Mapping[str, Mapping[str, Any]],
+    name: str,
+) -> Mapping[str, Any]:
+    item = checks.get(name)
     if item is None or item.get("status") != "PASS":
         raise CaserExecutionError(f"CASER_REQUIRED_CHECK_NOT_PASS:{name}")
     return item
 
 
-def _verified_effect(verification: Mapping[str, Any]) -> ExecutionEffect:
-    read_only = _check(verification, "read-only-effect")
-    read_only_verified = (
-        read_only is not None
-        and read_only.get("status") == "PASS"
-        and read_only.get("observed") == "READ_ONLY"
-    )
+def _verified_effect(checks: Mapping[str, Mapping[str, Any]]) -> ExecutionEffect:
+    read_only = checks.get("read-only-effect")
+    read_only_verified = False
+    if read_only is not None and read_only.get("status") == "PASS":
+        if read_only.get("observed") != ExecutionEffect.READ_ONLY.value:
+            raise CaserExecutionError("INVALID_VERIFIED_CASER_READ_ONLY_EFFECT")
+        read_only_verified = True
 
-    effect = _check(verification, "effect-class")
+    effect = checks.get("effect-class")
     effect_value: ExecutionEffect | None = None
     if effect is not None and effect.get("status") == "PASS":
         observed = effect.get("observed")
@@ -110,6 +134,7 @@ def _claims(verification: Mapping[str, Any]) -> tuple[bool, bool, bool]:
 
 def _verified_outcome(
     verification: Mapping[str, Any],
+    checks: Mapping[str, Mapping[str, Any]],
     *,
     outcome_verified: bool,
 ) -> ExecutionOutcome:
@@ -117,7 +142,8 @@ def _verified_outcome(
         return ExecutionOutcome.UNKNOWN
     if verification.get("runnerIndependent") is not True:
         raise CaserExecutionError("CASER_OUTCOME_NOT_RUNNER_INDEPENDENT")
-    if verification.get("verificationScope") == _INTEGRITY_ONLY_SCOPE:
+    scope = verification.get("verificationScope")
+    if scope == _INTEGRITY_ONLY_SCOPE or scope not in _OUTCOME_SCOPES:
         raise CaserExecutionError("CASER_OUTCOME_OUTSIDE_VERIFICATION_SCOPE")
 
     native_outcome = verification.get("executionOutcome")
@@ -127,10 +153,31 @@ def _verified_outcome(
     }:
         raise CaserExecutionError("INVALID_VERIFIED_CASER_EXECUTION_OUTCOME")
 
-    outcome_check = _require_pass_check(verification, "execution-outcome")
+    outcome_check = _require_pass_check(checks, "execution-outcome")
     if outcome_check.get("observed") != native_outcome:
         raise CaserExecutionError("CASER_EXECUTION_OUTCOME_CHECK_MISMATCH")
     return ExecutionOutcome(native_outcome)
+
+
+def _verified_post_state(
+    verification: Mapping[str, Any],
+    checks: Mapping[str, Mapping[str, Any]],
+    *,
+    post_state_verified: bool,
+) -> bool:
+    if not post_state_verified:
+        return False
+    if verification.get("runnerIndependent") is not True:
+        raise CaserExecutionError("CASER_POST_STATE_NOT_RUNNER_INDEPENDENT")
+    if verification.get("verificationScope") != _POST_STATE_SCOPE:
+        raise CaserExecutionError("CASER_POST_STATE_OUTSIDE_VERIFICATION_SCOPE")
+    if verification.get("verificationClass") != _POST_STATE_CLASS:
+        raise CaserExecutionError("CASER_POST_STATE_NOT_PROVIDER_INDEPENDENT")
+
+    check = _require_pass_check(checks, "provider-post-state")
+    if check.get("observed") != "VERIFIED":
+        raise CaserExecutionError("CASER_PROVIDER_POST_STATE_CHECK_MISMATCH")
+    return True
 
 
 class CaserExecutionAdapter:
@@ -179,6 +226,7 @@ class CaserExecutionAdapter:
         receipt_digest = receipt.get("contentIdentity")
         if not isinstance(receipt_digest, str) or not valid_digest(receipt_digest):
             raise CaserExecutionError("INVALID_CASER_RECEIPT_CONTENT_IDENTITY")
+        receipt_document_digest = _document_digest(receipt)
 
         if not isinstance(verification, Mapping):
             raise CaserExecutionError("INVALID_CASER_VERIFICATION")
@@ -196,6 +244,7 @@ class CaserExecutionAdapter:
         verification_digest = verification.get("contentIdentity")
         if not isinstance(verification_digest, str) or not valid_digest(verification_digest):
             raise CaserExecutionError("INVALID_CASER_VERIFICATION_CONTENT_IDENTITY")
+        verification_document_digest = _document_digest(verification)
         verified_at = _parse_timestamp(
             verification.get("verifiedAt"),
             "INVALID_CASER_VERIFIED_AT",
@@ -204,6 +253,8 @@ class CaserExecutionAdapter:
         verification_status = verification.get("status")
         if verification_status not in {"PASS", "FAIL"}:
             raise CaserExecutionError("INVALID_CASER_VERIFICATION_STATUS")
+
+        checks = _validated_checks(verification)
 
         receipt_ref = verification.get("receipt")
         if not isinstance(receipt_ref, Mapping):
@@ -215,11 +266,11 @@ class CaserExecutionAdapter:
         if receipt_ref.get("contentIdentity") != receipt_digest:
             raise CaserExecutionError("CASER_VERIFICATION_RECEIPT_DIGEST_MISMATCH")
 
-        schema_check = _require_pass_check(verification, "receipt-schema")
+        schema_check = _require_pass_check(checks, "receipt-schema")
         if schema_check.get("observed") != _CASER_RECEIPT_SCHEMA:
             raise CaserExecutionError("CASER_RECEIPT_SCHEMA_CHECK_MISMATCH")
 
-        identity_check = _require_pass_check(verification, "content-identity")
+        identity_check = _require_pass_check(checks, "content-identity")
         observed_identity = identity_check.get("observed")
         if not isinstance(observed_identity, Mapping):
             raise CaserExecutionError("INVALID_CASER_CONTENT_IDENTITY_CHECK")
@@ -229,10 +280,17 @@ class CaserExecutionAdapter:
         ):
             raise CaserExecutionError("CASER_CONTENT_IDENTITY_CHECK_MISMATCH")
 
-        integrity_verified, outcome_verified, post_state_verified = _claims(verification)
-        outcome = _verified_outcome(verification, outcome_verified=outcome_verified)
-        if post_state_verified:
-            _require_pass_check(verification, "provider-post-state")
+        integrity_verified, outcome_verified, post_state_claim = _claims(verification)
+        outcome = _verified_outcome(
+            verification,
+            checks,
+            outcome_verified=outcome_verified,
+        )
+        post_state_verified = _verified_post_state(
+            verification,
+            checks,
+            post_state_verified=post_state_claim,
+        )
 
         if not isinstance(binding, Mapping):
             raise CaserExecutionError("INVALID_CASER_EXECUTION_BINDING")
@@ -245,6 +303,8 @@ class CaserExecutionAdapter:
             "pre_proof_digest": pre_digest,
             "receipt_content_identity": receipt_digest,
             "verification_content_identity": verification_digest,
+            "receipt_document_digest": receipt_document_digest,
+            "verification_document_digest": verification_document_digest,
             "execution_instance_id": execution_instance_id,
         }
         for field_name, expected in expected_binding.items():
@@ -275,7 +335,7 @@ class CaserExecutionAdapter:
         if trusted_binding is not True:
             raise CaserExecutionError("UNTRUSTED_CASER_EXECUTION_BINDING")
 
-        effect = _verified_effect(verification)
+        effect = _verified_effect(checks)
         normalized = build_execution_receipt(
             provider=cls.provider_id,
             operation_id=operation_id,
@@ -296,6 +356,8 @@ class CaserExecutionAdapter:
                 "caser_verification_class": verification.get("verificationClass"),
                 "caser_verification_scope": verification.get("verificationScope"),
                 "caser_verified_at": verification.get("verifiedAt"),
+                "native_receipt_document_digest": receipt_document_digest,
+                "native_verification_document_digest": verification_document_digest,
             },
         )
 
