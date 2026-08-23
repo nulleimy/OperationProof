@@ -143,6 +143,12 @@ def _registry(
 ) -> ProviderTrustRegistry:
     authorization = _authorization(grant)
     document_digest = str(authorization.metadata["grant_document_digest"])
+
+    def resolve_consumption(jti: str) -> dict[str, Any] | None:
+        if witness is not None and jti == grant["jti"]:
+            return witness
+        return None
+
     registry = ProviderTrustRegistry()
     for layer in PRE_LAYERS:
         if layer == Layer.AUTHORIZATION:
@@ -153,9 +159,7 @@ def _registry(
                     grant_resolver={document_digest: grant}.get,
                     grant_verifier=admission_verifier,
                     clock=lambda: post_now,
-                    consumption_resolver=(
-                        (lambda jti: witness if witness is not None and jti == grant["jti"] else None)
-                    ),
+                    consumption_resolver=resolve_consumption,
                     consumption_verifier=lambda _witness: True,
                 ),
             )
@@ -349,5 +353,5 @@ def test_consumption_witness_tamper_or_authenticator_failure_fails_closed() -> N
 
     assert verify_proof_trust(final, registry).trusted is False
 
-    # Ensure DIRECT PRE remains a separate question and does not accept a witness as a substitute.
+    # DIRECT PRE remains separate and never uses the consumption witness as authority.
     assert verify_proof_trust(pre, registry).trusted is True
