@@ -123,6 +123,13 @@ def verify_protection_document(
             ):
                 reasons.append("PULL_REQUEST_BYPASS_ALLOWANCE_PRESENT")
 
+    if "restrictions" not in policy or policy.get("restrictions") is not None:
+        raise GovernanceVerificationError("policy.restrictions must be explicitly null")
+    if "restrictions" not in protection:
+        reasons.append("PUSH_RESTRICTIONS_STATE_MISSING")
+    elif protection.get("restrictions") is not None:
+        reasons.append("PUSH_RESTRICTIONS_PRESENT")
+
     booleans = (
         ("required_conversation_resolution", "CONVERSATION_RESOLUTION_DISABLED"),
         ("allow_force_pushes", "FORCE_PUSH_POLICY_MISMATCH"),
