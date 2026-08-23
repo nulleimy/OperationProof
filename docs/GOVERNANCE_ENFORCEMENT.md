@@ -13,6 +13,7 @@ Required controls:
 - stale review dismissal enabled
 - zero mandatory human approvals, so a single-maintainer repository is not deadlocked
 - PR bypass actors forbidden
+- branch push restrictions explicitly cleared (`restrictions: null`)
 - conversation resolution required
 - administrator enforcement enabled
 - force pushes disabled
@@ -59,6 +60,8 @@ python3 scripts/verify_repository_enforcement.py --repo nulleimy/OperationProof
 ```
 
 A successful verification emits one compact JSON record with `verified:true` and exits `0`. Any missing, weakened, inaccessible, or malformed protection state exits non-zero.
+
+The verifier also rejects push-restriction drift. The canonical G0 state explicitly requires `restrictions: null`; non-null or missing live restriction state is not accepted as equivalent.
 
 ## Trust boundary
 
