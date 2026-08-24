@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from ..canonical import sha256_digest, valid_digest
+from ..canonical import canonical_json_bytes, sha256_digest, valid_digest
 from ..domain import EvidenceEnvelope, Layer, Verdict
 
 _ALLOWED_ACTIONS = {"CONTINUE", "PAUSE", "REVALIDATE", "ABORT", "RECOVER"}
@@ -16,6 +17,16 @@ class HowedoWitnessError(ValueError):
 
 
 BindingVerifier = Callable[[Mapping[str, Any]], bool]
+
+
+def _snapshot_document(document: Mapping[str, Any], code: str) -> dict[str, Any]:
+    try:
+        snapshot = json.loads(canonical_json_bytes(dict(document)).decode("utf-8"))
+    except (TypeError, ValueError, OverflowError, json.JSONDecodeError) as exc:
+        raise HowedoWitnessError(code) from exc
+    if not isinstance(snapshot, dict):
+        raise HowedoWitnessError(code)
+    return snapshot
 
 
 def _parse_timestamp(value: Any, code: str) -> datetime:
@@ -74,10 +85,13 @@ class HowedoWitnessAdapter:
         if not callable(binding_verifier):
             raise HowedoWitnessError("INVALID_BINDING_VERIFIER")
 
-        snapshot_id = witness.get("snapshot_id")
-        action = witness.get("action")
-        reason_codes = witness.get("reason_codes")
-        witness_digest = witness.get("witness_digest")
+        witness_snapshot = _snapshot_document(witness, "INVALID_HOWEDO_WITNESS")
+        binding_snapshot = _snapshot_document(binding, "INVALID_HOWEDO_BINDING")
+
+        snapshot_id = witness_snapshot.get("snapshot_id")
+        action = witness_snapshot.get("action")
+        reason_codes = witness_snapshot.get("reason_codes")
+        witness_digest = witness_snapshot.get("witness_digest")
 
         if not isinstance(snapshot_id, str) or not valid_digest(snapshot_id):
             raise HowedoWitnessError("INVALID_SNAPSHOT_ID")
@@ -101,38 +115,37 @@ class HowedoWitnessAdapter:
         if witness_digest != expected_witness_digest:
             raise HowedoWitnessError("HOWEDO_WITNESS_DIGEST_MISMATCH")
 
-        if binding.get("schema") != _BINDING_SCHEMA:
+        if binding_snapshot.get("schema") != _BINDING_SCHEMA:
             raise HowedoWitnessError("INVALID_BINDING_SCHEMA")
-        if binding.get("operation_id") != operation_id:
+        if binding_snapshot.get("operation_id") != operation_id:
             raise HowedoWitnessError("BINDING_OPERATION_ID_MISMATCH")
-        if binding.get("snapshot_id") != snapshot_id:
+        if binding_snapshot.get("snapshot_id") != snapshot_id:
             raise HowedoWitnessError("BINDING_SNAPSHOT_ID_MISMATCH")
-        if binding.get("witness_digest") != witness_digest:
+        if binding_snapshot.get("witness_digest") != witness_digest:
             raise HowedoWitnessError("BINDING_WITNESS_DIGEST_MISMATCH")
 
-        issued_at = binding.get("issued_at")
-        expires_at = binding.get("expires_at")
+        issued_at = binding_snapshot.get("issued_at")
+        expires_at = binding_snapshot.get("expires_at")
         issued = _parse_timestamp(issued_at, "INVALID_BINDING_ISSUED_AT")
         expires = _parse_timestamp(expires_at, "INVALID_BINDING_EXPIRES_AT")
         if expires <= issued:
             raise HowedoWitnessError("INVALID_BINDING_TIME_WINDOW")
 
-        binding_digest = binding.get("binding_digest")
+        binding_digest = binding_snapshot.get("binding_digest")
         if not isinstance(binding_digest, str) or not valid_digest(binding_digest):
             raise HowedoWitnessError("INVALID_BINDING_DIGEST")
-        expected_binding_digest = sha256_digest(_binding_payload(binding))
+        expected_binding_digest = sha256_digest(_binding_payload(binding_snapshot))
         if binding_digest != expected_binding_digest:
             raise HowedoWitnessError("BINDING_DIGEST_MISMATCH")
 
         try:
-            trusted = binding_verifier(binding)
-        except Exception as exc:  # fail closed across provider verifier failures
+            verifier_binding = _snapshot_document(binding_snapshot, "INVALID_HOWEDO_BINDING")
+            trusted = binding_verifier(verifier_binding)
+        except Exception as exc:
             raise HowedoWitnessError("BINDING_VERIFICATION_ERROR") from exc
         if trusted is not True:
             raise HowedoWitnessError("UNTRUSTED_HOWEDO_BINDING")
 
-        # Only CONTINUE authorizes the original operation to proceed now. PAUSE,
-        # REVALIDATE, ABORT, and RECOVER all require another control-flow step first.
         verdict = Verdict.PASS if action == "CONTINUE" else Verdict.FAIL
         subject_digest = sha256_digest(
             {
