@@ -126,6 +126,6 @@ def emit_telemetry_best_effort(
         return False
     try:
         sink.emit(dict(event))
-    except Exception:
+    except Exception:  # noqa: BLE001
         return False
     return True
