@@ -30,11 +30,14 @@ Supported R11 lifecycle events:
 - `proof_assessed`
 - `admission_created`
 - `admission_consumed`
+- `upstream_dispatch_prepared`
 - `upstream_dispatched`
 - `upstream_completed`
 - `upstream_failed`
 - `execution_receipt_verified`
 - `final_proof_composed`
+
+`upstream_dispatch_prepared` is a durable pre-network barrier. After it persists, the gateway performs another admission-expiry check immediately before opening the upstream stream. `upstream_dispatched` is emitted only after the upstream stream has actually been entered. This separation prevents slow provenance persistence from weakening the R10 freshness invariant or falsely claiming that an expired request was sent.
 
 Raw request bodies, response bodies, admission tokens, provider secrets, signing keys, and raw evidence payloads are not event fields by default.
 
@@ -49,7 +52,7 @@ provenance policy = required
 telemetry policy  = best-effort
 ```
 
-Use the canonical R10 `create_gateway_app()` when provenance is not configured. Do not silently substitute best-effort logs for an R11 provenance store.
+Use the canonical R10 `create_gateway_app()` when provenance is not configured. Its optional pre-dispatch hook defaults to `None`; R11 owns that hook only when the attested gateway composition is explicitly selected. Do not silently substitute best-effort logs for an R11 provenance store.
 
 ## Deployment requirements
 
@@ -65,4 +68,4 @@ Production deployments should supply at startup/out-of-band:
 
 The caller owns the lifecycle of the injected `httpx.AsyncClient`; R11 does not silently replace or close a caller-owned client.
 
-Client HTTP input must never select any of these trust components.
+Client HTTP input must never select any of these trust components or the R11 pre-dispatch hook.
