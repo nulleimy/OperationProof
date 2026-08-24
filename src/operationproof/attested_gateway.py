@@ -128,8 +128,39 @@ def _request_binding(
     return operation_id, subject_digest, proof_digest, artifact_digest
 
 
+def _record_dispatch_prepared(
+    recorder: ProvenanceRecorder,
+    record: GatewayAdmissionRecord,
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    content: bytes,
+) -> None:
+    operation_id, subject_digest, proof_digest, request_digest = _request_binding(
+        method,
+        url,
+        headers,
+        content,
+    )
+    if (
+        operation_id != record.operation_id
+        or subject_digest != record.subject_digest
+        or proof_digest != record.proof_digest
+    ):
+        raise ProvenanceRecorderError("ATTESTED_DISPATCH_BINDING_MISMATCH")
+    recorder.record_event(
+        event_type="upstream_dispatch_prepared",
+        operation_id=operation_id,
+        subject_digest=subject_digest,
+        proof_digest=proof_digest,
+        artifact_digest=request_digest,
+        state_from="ADMISSION_CONSUMED",
+        state_to="UPSTREAM_DISPATCH_PREPARED",
+    )
+
+
 class AttestedHTTPClient:
-    """Startup-injected HTTP client decorator emitting required dispatch provenance."""
+    """Startup-injected HTTP client decorator emitting post-network dispatch provenance."""
 
     def __init__(self, client: httpx.AsyncClient, recorder: ProvenanceRecorder) -> None:
         if not isinstance(client, httpx.AsyncClient):
@@ -147,18 +178,20 @@ class AttestedHTTPClient:
             kwargs.get("headers", {}),
             kwargs.get("content", b""),
         )
-        self._recorder.record_event(
-            event_type="upstream_dispatched",
-            operation_id=operation_id,
-            subject_digest=subject_digest,
-            proof_digest=proof_digest,
-            artifact_digest=request_digest,
-            state_from="ADMISSION_CONSUMED",
-            state_to="UPSTREAM_DISPATCHED",
-        )
+        dispatched_recorded = False
         failure_recorded = False
         try:
             async with self._client.stream(method, url, **kwargs) as response:
+                self._recorder.record_event(
+                    event_type="upstream_dispatched",
+                    operation_id=operation_id,
+                    subject_digest=subject_digest,
+                    proof_digest=proof_digest,
+                    artifact_digest=request_digest,
+                    state_from="UPSTREAM_DISPATCH_PREPARED",
+                    state_to="UPSTREAM_DISPATCHED",
+                )
+                dispatched_recorded = True
                 try:
                     yield response
                 except Exception:
@@ -205,7 +238,11 @@ class AttestedHTTPClient:
                     subject_digest=subject_digest,
                     proof_digest=proof_digest,
                     artifact_digest=failure_digest,
-                    state_from="UPSTREAM_DISPATCHED",
+                    state_from=(
+                        "UPSTREAM_DISPATCHED"
+                        if dispatched_recorded
+                        else "UPSTREAM_DISPATCH_PREPARED"
+                    ),
                     state_to="UPSTREAM_FAILED",
                     reason_codes=("UPSTREAM_TRANSPORT_FAILED",),
                 )
@@ -220,7 +257,7 @@ def create_attested_gateway_app(
     http_client: httpx.AsyncClient,
     **gateway_kwargs: Any,
 ):
-    """Compose R11 required provenance around the unchanged R10 gateway authority path.
+    """Compose R11 required provenance around the R10 gateway authority path.
 
     Signer, verifier, attestation store, telemetry sink, admission store and upstream
     client are all startup/out-of-band dependencies. No HTTP request can select them.
@@ -228,11 +265,31 @@ def create_attested_gateway_app(
 
     if "http_client" in gateway_kwargs:
         raise TypeError("HTTP_CLIENT_MUST_BE_STARTUP_ARGUMENT")
+    if "before_upstream_dispatch" in gateway_kwargs:
+        raise TypeError("PRE_DISPATCH_HOOK_CONTROLLED_BY_R11")
     attested_store = AttestedGatewayAdmissionStore(admission_store, provenance_recorder)
     attested_client = AttestedHTTPClient(http_client, provenance_recorder)
+
+    def before_upstream_dispatch(
+        record: GatewayAdmissionRecord,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        content: bytes,
+    ) -> None:
+        _record_dispatch_prepared(
+            provenance_recorder,
+            record,
+            method,
+            url,
+            headers,
+            content,
+        )
+
     return create_gateway_app(
         registry,
         attested_store,
         http_client=attested_client,
+        before_upstream_dispatch=before_upstream_dispatch,
         **gateway_kwargs,
     )
