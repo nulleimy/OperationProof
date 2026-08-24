@@ -77,9 +77,10 @@ class MemoryGatewayAdmissionStore(GatewayAdmissionStore):
         if not isinstance(record, GatewayAdmissionRecord):
             raise GatewayAdmissionStoreError("INVALID_ADMISSION_RECORD")
         with self._lock:
-            if record.operation_id in self._reserved_operations:
-                raise GatewayAdmissionStoreError("OPERATION_REPLAY_DETECTED")
-            if record.proof_digest in self._reserved_proofs:
+            if (
+                record.operation_id in self._reserved_operations
+                or record.proof_digest in self._reserved_proofs
+            ):
                 raise GatewayAdmissionStoreError("PROOF_REPLAY_DETECTED")
             if len(self._reserved_operations) >= self._max_records:
                 raise GatewayAdmissionStoreError("ADMISSION_STORE_CAPACITY_EXCEEDED")
