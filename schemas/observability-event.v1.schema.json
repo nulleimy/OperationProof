@@ -1,0 +1,93 @@
+{
+  "$id": "https://operationproof.dev/schemas/observability-event.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "event_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "event_id": {
+      "minLength": 1,
+      "type": "string",
+      "maxLength": 512
+    },
+    "event_type": {
+      "enum": [
+        "proof_assessed",
+        "admission_created",
+        "admission_consumed",
+        "upstream_dispatched",
+        "upstream_completed",
+        "upstream_failed",
+        "execution_receipt_verified",
+        "final_proof_composed"
+      ]
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "operation_id": {
+      "minLength": 1,
+      "type": "string",
+      "maxLength": 512
+    },
+    "proof_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schema": {
+      "const": "operationproof.observability-event.v1"
+    },
+    "state_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "state_to": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "subject_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "event_id",
+    "event_type",
+    "operation_id",
+    "subject_digest",
+    "proof_digest",
+    "artifact_digest",
+    "occurred_at",
+    "state_from",
+    "state_to",
+    "reason_codes",
+    "event_digest"
+  ],
+  "title": "OperationProof Observability Event v1",
+  "type": "object"
+}
