@@ -93,6 +93,32 @@ fixed startup-configured upstream
 
 Gateway mode has no integrity-only escape. It requires provider trust, a replay/admission store, expiry on every PRE evidence envelope, exact method/path/query/header/body binding, bounded request/response bodies, one-time token consumption, and a startup-only upstream URL. See `docs/GATEWAY_RUNTIME.md`.
 
+## Signed provenance and observability
+
+R11 adds canonical signed attestations and an append-only provenance chain without changing authority semantics.
+
+```text
+PRE proof
+  ↓
+proof_assessed
+  ↓
+admission_created
+  ↓
+admission_consumed
+  ↓
+upstream_dispatched
+  ↓
+upstream_completed | upstream_failed
+  ↓
+execution_receipt_verified
+  ↓
+final_proof_composed
+```
+
+`operationproof.attestation.v1` binds one operation, one subject, one PRE proof anchor, one related artifact, issuer identity, timestamp, sequence, predecessor digest, payload digest, and its own canonical digest. Signatures are evaluated through explicit external signer/verifier adapters; OperationProof ships no global trust root.
+
+Signing does not imply `VERIFIED`, authorization, or execution success. Required provenance persistence is distinct from best-effort telemetry export. See `docs/ATTESTATIONS.md` and `docs/OBSERVABILITY.md`.
+
 ## Non-goals
 
 OperationProof is not an IAM platform, policy engine, agent runtime, sandbox, DLP engine, observability backend, lineage platform, budget manager, or LLM judge. Providers remain external and are integrated through narrow adapters.
@@ -124,6 +150,8 @@ R8 adds the optional fail-closed sidecar API/runtime with trusted out-of-band re
 R9 adds exact provider adapter manifests, duplicate-safe discovery, normalized-envelope validation, a reusable six-scenario conformance runner, first-party HOWEDO/V-One/CASER conformance suites, and detached HOWEDO authority-callback inputs.
 
 R10 adds active gateway enforcement with canonical HTTP target binding, trusted PRE/v2 admission, one-time replay protection, startup-only upstream routing, bounded proxy I/O, and no integrity-only forwarding mode.
+
+R11 adds canonical attestations, explicit external signature trust, append-only provenance with replay/order/transplant protection, structured digest-only observability, required provenance persistence, best-effort telemetry, R10 gateway lifecycle integration, and execution/FINAL provenance helpers.
 
 ## Local verification
 
