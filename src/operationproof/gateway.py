@@ -554,7 +554,7 @@ def create_gateway_app(
                 raise GatewayRequestError(401, "ADMISSION_TOKEN_EXPIRED")
         except GatewayRequestError as exc:
             return _error_response(exc.status_code, exc.reason_code)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return _error_response(503, "BEFORE_UPSTREAM_DISPATCH_FAILED")
 
         client = request.app.state.gateway_client
