@@ -122,7 +122,7 @@ def _snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError, OverflowError, json.JSONDecodeError, RecursionError) as exc:
         raise ValueError("INVALID_ATTESTATION_DOCUMENT") from exc
     if not isinstance(parsed, dict):
-        raise ValueError("INVALID_ATTESTATION_DOCUMENT")
+        raise ValueError("INVALID_ATTESTATION_DOCUMENT")  # noqa: TRY004
     return parsed
 
 
@@ -226,9 +226,9 @@ def verify_attestation_integrity(
         if (
             not isinstance(max_future_skew_seconds, int)
             or isinstance(max_future_skew_seconds, bool)
+            or max_future_skew_seconds < 0
+            or max_future_skew_seconds > 300
         ):
-            reasons.append("INVALID_ATTESTATION_FUTURE_SKEW")
-        elif max_future_skew_seconds < 0 or max_future_skew_seconds > 300:
             reasons.append("INVALID_ATTESTATION_FUTURE_SKEW")
         else:
             reference = now or datetime.now(UTC)
@@ -385,7 +385,7 @@ def verify_attestation_signature(
         payload = canonical_json_bytes(dict(attestation))
         try:
             result = verifier.verify(payload, encoded)
-        except Exception:
+        except Exception:  # noqa: BLE001
             reasons.append("SIGNATURE_VERIFIER_FAILED")
         else:
             if not isinstance(result, bool):
