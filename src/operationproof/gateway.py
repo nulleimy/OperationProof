@@ -62,6 +62,12 @@ class GatewayConfig:
     forward_headers: tuple[str, ...] = ("content-type",)
 
 
+GatewayDispatchHook = Callable[
+    [GatewayAdmissionRecord, str, str, dict[str, str], bytes],
+    None,
+]
+
+
 def _security_headers() -> dict[str, str]:
     return {
         "cache-control": "no-store",
@@ -351,6 +357,7 @@ def create_gateway_app(
     forward_headers: tuple[str, ...] = ("content-type",),
     clock: Callable[[], datetime] | None = None,
     http_client: httpx.AsyncClient | None = None,
+    before_upstream_dispatch: GatewayDispatchHook | None = None,
 ) -> FastAPI:
     """Create an active OperationProof gateway with one-time proof admission.
 
@@ -363,6 +370,8 @@ def create_gateway_app(
         raise GatewayConfigError("TRUST_REGISTRY_REQUIRED")
     if not isinstance(admission_store, GatewayAdmissionStore):
         raise GatewayConfigError("ADMISSION_STORE_REQUIRED")
+    if before_upstream_dispatch is not None and not callable(before_upstream_dispatch):
+        raise GatewayConfigError("INVALID_BEFORE_UPSTREAM_DISPATCH")
     config = _validate_config(
         GatewayConfig(
             upstream_base_url=upstream_base_url,
@@ -531,6 +540,23 @@ def create_gateway_app(
                 "x-operationproof-subject-digest": record.subject_digest,
             }
         )
+        try:
+            if before_upstream_dispatch is not None:
+                await run_in_threadpool(
+                    before_upstream_dispatch,
+                    record,
+                    request.method,
+                    upstream_url,
+                    dict(upstream_headers),
+                    bytes(body),
+                )
+            if _record_is_expired(record, _clock_now(clock_fn)):
+                raise GatewayRequestError(401, "ADMISSION_TOKEN_EXPIRED")
+        except GatewayRequestError as exc:
+            return _error_response(exc.status_code, exc.reason_code)
+        except Exception:  # noqa: BLE001
+            return _error_response(503, "BEFORE_UPSTREAM_DISPATCH_FAILED")
+
         client = request.app.state.gateway_client
         try:
             async with client.stream(

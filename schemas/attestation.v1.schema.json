@@ -1,0 +1,86 @@
+{
+  "$id": "https://operationproof.dev/schemas/attestation.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifact_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "artifact_type": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "attestation_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "attestation_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "issued_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "issuer_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "operation_id": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "payload_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "previous_attestation_digest": {
+      "oneOf": [
+        {
+          "const": "GENESIS"
+        },
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        }
+      ]
+    },
+    "proof_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "schema": {
+      "const": "operationproof.attestation.v1"
+    },
+    "sequence": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "subject_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "attestation_id",
+    "operation_id",
+    "subject_digest",
+    "proof_digest",
+    "artifact_type",
+    "artifact_digest",
+    "issuer_id",
+    "issued_at",
+    "sequence",
+    "previous_attestation_digest",
+    "payload_digest",
+    "attestation_digest"
+  ],
+  "title": "OperationProof Attestation v1",
+  "type": "object"
+}
