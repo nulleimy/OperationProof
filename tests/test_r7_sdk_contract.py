@@ -81,6 +81,7 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
         "PROVIDER_ADAPTER_CONTRACT",
         "SDK_CONTRACT",
         "SIGNED_ATTESTATION_SCHEMA",
+        "SIGNED_OBSERVABILITY_EVENT_SCHEMA",
         "AdapterOutputValidationResult",
         "AttestationChainVerificationResult",
         "AttestationError",
@@ -105,6 +106,7 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
         "ObservabilityEmitResult",
         "ObservabilityError",
         "ObservabilityEventType",
+        "ObservabilityVerificationResult",
         "OperationSubject",
         "OperationSubjectError",
         "ProofAssessment",
@@ -145,6 +147,7 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
         "make_subject_bound_trust_verifier",
         "parse_proof_json",
         "run_provider_conformance",
+        "sign_observability_event",
         "sign_provenance_statement",
         "validate_adapter_output",
         "verify_attestation_chain",
@@ -154,6 +157,7 @@ def test_sdk_contract_is_named_and_public_surface_is_pinned() -> None:
         "verify_proof_trust",
         "verify_provenance_statement",
         "verify_signed_attestation",
+        "verify_signed_observability_event",
     ]
 
 
