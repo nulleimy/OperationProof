@@ -97,7 +97,7 @@ External store outputs are runtime-validated. After append, `ProvenanceRecorder`
 
 ## Gateway lifecycle
 
-R11 composes around the unchanged R10 gateway using `operationproof.attested_gateway.create_attested_gateway_app()`.
+R11 extends the R10 gateway with one optional startup-only pre-dispatch hook. The hook defaults to `None`; existing R10 callers retain the same authority model. When R11 is enabled through `operationproof.attested_gateway.create_attested_gateway_app()`, the hook is controlled exclusively by the R11 composition layer.
 
 Required provenance events are:
 
@@ -105,9 +105,12 @@ Required provenance events are:
 proof_assessed
 → admission_created
 → admission_consumed
+→ upstream_dispatch_prepared
 → upstream_dispatched
 → upstream_completed | upstream_failed
 ```
+
+`upstream_dispatch_prepared` is a durable pre-dispatch barrier. After it is persisted, the gateway rechecks admission expiry immediately before any network dispatch. `upstream_dispatched` is emitted only after the underlying upstream stream has actually been entered. This prevents a slow provenance write from reopening the R10 expiry TOCTOU window and prevents provenance from falsely claiming that network dispatch occurred when freshness rejected the request.
 
 The wrapper preserves R10 semantics:
 
@@ -115,11 +118,12 @@ The wrapper preserves R10 semantics:
 - one-time token replay semantics remain owned by the R10 admission store,
 - token consumption still occurs before target verification,
 - target mismatch still burns the token,
+- expiry is rechecked after request reconstruction and again after the R11 pre-dispatch barrier,
 - upstream remains startup-fixed,
 - request/response bounds remain unchanged,
-- no request can supply signer, verifier, issuer, key id, provenance store, or telemetry sink.
+- no request can supply signer, verifier, issuer, key id, provenance store, telemetry sink, or pre-dispatch hook.
 
-If required provenance persistence fails before admission, admission fails. If it fails after token consumption, the token remains burned. If completion provenance fails after an upstream side effect, OperationProof cannot undo the side effect; it fails the response path closed and records no false success claim.
+If required provenance persistence fails before admission, admission fails. If it fails after token consumption, the token remains burned. If the pre-dispatch barrier succeeds but the admission expires before network dispatch, the gateway returns `ADMISSION_TOKEN_EXPIRED`, performs no upstream I/O, and the token remains burned. If post-dispatch or completion provenance fails after an upstream side effect, OperationProof cannot undo the side effect; it fails the response path closed and records no false success claim.
 
 ## Execution and FINAL integration
 
