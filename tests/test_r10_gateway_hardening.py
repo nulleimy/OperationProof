@@ -130,7 +130,7 @@ def test_gateway_rejects_naive_runtime_clock_fail_closed() -> None:
         operationproof.MemoryGatewayAdmissionStore(),
         upstream_base_url="https://upstream.test",
         upstream_id=_UPSTREAM_ID,
-        clock=lambda: datetime(2026, 8, 24, 0, 0, 0),
+        clock=lambda: datetime(2026, 8, 24, 0, 0, 0),  # noqa: DTZ001 - intentional
     )
 
     with TestClient(app) as client:
