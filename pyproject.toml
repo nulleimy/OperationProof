@@ -20,6 +20,9 @@ operationproof-sidecar = "operationproof.sidecar_runtime:main"
 operationproof-verify = "operationproof.cli:main"
 
 [project.optional-dependencies]
+attestations = [
+    "cryptography>=50.0.0,<51",
+]
 sidecar = [
     "fastapi>=0.141.1,<0.142",
     "uvicorn>=0.52.3,<0.53",
@@ -32,6 +35,7 @@ gateway = [
 dev = [
     "pytest>=8",
     "ruff>=0.9",
+    "cryptography>=50.0.0,<51",
     "fastapi>=0.141.1,<0.142",
     "uvicorn>=0.52.3,<0.53",
     "httpx==0.28.1",
@@ -50,3 +54,8 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+"src/operationproof/attestation.py" = ["BLE001", "F401"]
+"src/operationproof/observability.py" = ["BLE001"]
+"tests/test_r11_attestation.py" = ["F401"]
