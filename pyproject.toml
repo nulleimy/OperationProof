@@ -15,12 +15,18 @@ dependencies = []
 Repository = "https://github.com/nulleimy/OperationProof"
 
 [project.scripts]
-operationproof-verify = "operationproof.cli:main"
+operationproof-gateway = "operationproof.gateway_runtime:main"
 operationproof-sidecar = "operationproof.sidecar_runtime:main"
+operationproof-verify = "operationproof.cli:main"
 
 [project.optional-dependencies]
 sidecar = [
     "fastapi>=0.141.1,<0.142",
+    "uvicorn>=0.52.3,<0.53",
+]
+gateway = [
+    "fastapi>=0.141.1,<0.142",
+    "httpx==0.28.1",
     "uvicorn>=0.52.3,<0.53",
 ]
 dev = [
