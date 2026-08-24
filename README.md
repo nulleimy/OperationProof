@@ -73,6 +73,26 @@ assert report.passed, report.to_dict()
 
 The mandatory profile covers valid normalization, operation-transplant rejection, untrusted authority, authority exceptions, caller-input mutation isolation, and deterministic output. A conformance PASS does not grant runtime provider trust. See `docs/PROVIDER_CONFORMANCE.md`.
 
+## Gateway mode
+
+R10 adds an active trusted gateway. It uses a two-step admission flow so a trusted PRE proof cannot become a replayable bearer capability:
+
+```text
+trusted PRE/v2 proof
+        ↓
+POST /v1/admissions
+        ↓
+one-time admission token
+        ↓
+/v1/proxy/<path>
+        ↓
+exact request digest == OperationSubject.target_digest
+        ↓
+fixed startup-configured upstream
+```
+
+Gateway mode has no integrity-only escape. It requires provider trust, a replay/admission store, expiry on every PRE evidence envelope, exact method/path/query/header/body binding, bounded request/response bodies, one-time token consumption, and a startup-only upstream URL. See `docs/GATEWAY_RUNTIME.md`.
+
 ## Non-goals
 
 OperationProof is not an IAM platform, policy engine, agent runtime, sandbox, DLP engine, observability backend, lineage platform, budget manager, or LLM judge. Providers remain external and are integrated through narrow adapters.
@@ -102,6 +122,8 @@ R7 adds the stable SDK/library contract: strict raw JSON parsing, deterministic 
 R8 adds the optional fail-closed sidecar API/runtime with trusted out-of-band registry bootstrap, loopback-only defaults, bounded HTTP input, liveness/readiness separation, and the same R7 acceptance semantics over HTTP.
 
 R9 adds exact provider adapter manifests, duplicate-safe discovery, normalized-envelope validation, a reusable six-scenario conformance runner, first-party HOWEDO/V-One/CASER conformance suites, and detached HOWEDO authority-callback inputs.
+
+R10 adds active gateway enforcement with canonical HTTP target binding, trusted PRE/v2 admission, one-time replay protection, startup-only upstream routing, bounded proxy I/O, and no integrity-only forwarding mode.
 
 ## Local verification
 

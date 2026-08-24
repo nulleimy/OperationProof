@@ -18,6 +18,20 @@ from .execution import (
     build_execution_receipt,
     verify_execution_receipt,
 )
+from .gateway_contract import (
+    GATEWAY_TARGET_CONTRACT,
+    GatewayTarget,
+    GatewayTargetError,
+    build_gateway_target,
+    canonical_gateway_headers,
+    gateway_target_digest,
+)
+from .gateway_store import (
+    GatewayAdmissionRecord,
+    GatewayAdmissionStore,
+    GatewayAdmissionStoreError,
+    MemoryGatewayAdmissionStore,
+)
 from .provider import (
     PROVIDER_ADAPTER_CONTRACT,
     AdapterOutputValidationResult,
@@ -51,6 +65,7 @@ from .verifier import VerificationResult, verify_proof
 
 __all__ = [
     "CONFORMANCE_CONTRACT",
+    "GATEWAY_TARGET_CONTRACT",
     "PROVIDER_ADAPTER_CONTRACT",
     "SDK_CONTRACT",
     "AdapterOutputValidationResult",
@@ -59,7 +74,13 @@ __all__ = [
     "ExecutionEffect",
     "ExecutionOutcome",
     "ExecutionReceiptVerificationResult",
+    "GatewayAdmissionRecord",
+    "GatewayAdmissionStore",
+    "GatewayAdmissionStoreError",
+    "GatewayTarget",
+    "GatewayTargetError",
     "Layer",
+    "MemoryGatewayAdmissionStore",
     "OperationSubject",
     "OperationSubjectError",
     "ProofAssessment",
@@ -83,8 +104,11 @@ __all__ = [
     "bind_evidence_to_subject",
     "build_execution_receipt",
     "build_final_proof",
+    "build_gateway_target",
     "build_pre_proof",
+    "canonical_gateway_headers",
     "canonical_proof_json",
+    "gateway_target_digest",
     "make_subject_bound_trust_verifier",
     "parse_proof_json",
     "run_provider_conformance",
