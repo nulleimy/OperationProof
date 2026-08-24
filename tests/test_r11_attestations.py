@@ -8,8 +8,8 @@ import operationproof
 from operationproof.attestation import AttestationSigner
 from operationproof.attestation_store import (
     AttestationStore,
-    AttestationStoreHead,
     AttestationStoreError,
+    AttestationStoreHead,
 )
 from operationproof.canonical import sha256_digest
 from operationproof.domain import PRE_LAYERS
@@ -344,7 +344,6 @@ class _MutatingOutputStore(AttestationStore):
 
     def read(self, operation_id: str, sequence: int):
         del operation_id, sequence
-        return None
 
 
 class _MutatingReadbackStore(AttestationStore):
@@ -397,7 +396,6 @@ class _FailingAppendStore(AttestationStore):
 
     def read(self, operation_id: str, sequence: int):
         del operation_id, sequence
-        return None
 
 
 def _recorder(
