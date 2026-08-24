@@ -14,6 +14,7 @@ OBSERVABILITY_EVENT_TYPES = frozenset(
         "proof_assessed",
         "admission_created",
         "admission_consumed",
+        "upstream_dispatch_prepared",
         "upstream_dispatched",
         "upstream_completed",
         "upstream_failed",
