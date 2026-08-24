@@ -4,7 +4,11 @@ import argparse
 import importlib
 from collections.abc import Callable, Sequence
 
-from .gateway_store import GatewayAdmissionStore, MemoryGatewayAdmissionStore
+from .gateway_store import (
+    GatewayAdmissionStore,
+    GatewayAdmissionStoreError,
+    MemoryGatewayAdmissionStore,
+)
 from .sidecar_runtime import TrustFactoryError, load_trust_registry
 
 
@@ -97,7 +101,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             admission_store = MemoryGatewayAdmissionStore(
                 max_records=args.ephemeral_store_capacity
             )
-        except Exception as exc:
+        except GatewayAdmissionStoreError as exc:
             parser.error(str(exc))
     else:
         parser.error(
