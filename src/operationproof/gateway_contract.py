@@ -98,7 +98,7 @@ def canonical_gateway_headers(headers: Mapping[str, str] | None) -> dict[str, st
 def raw_body_digest(body: bytes | bytearray) -> str:
     if not isinstance(body, (bytes, bytearray)):
         raise GatewayTargetError("INVALID_GATEWAY_BODY")
-    return hashlib.sha256(bytes(body)).hexdigest()
+    return "sha256:" + hashlib.sha256(bytes(body)).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
