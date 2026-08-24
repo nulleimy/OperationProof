@@ -86,6 +86,8 @@ def _error_response(status_code: int, reason_code: str) -> JSONResponse:
 def _validate_upstream(value: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip() or "\x00" in value:
         raise GatewayConfigError("INVALID_UPSTREAM_BASE_URL")
+    if "?" in value or "#" in value:
+        raise GatewayConfigError("INVALID_UPSTREAM_BASE_URL")
     parsed = urlsplit(value)
     if (
         parsed.scheme not in {"http", "https"}
@@ -192,6 +194,17 @@ def _require_identity_encoding(request: Request) -> None:
         raise GatewayRequestError(415, "UNSUPPORTED_CONTENT_ENCODING")
 
 
+def _clock_now(clock_fn: Callable[[], datetime]) -> datetime:
+    value = clock_fn()
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise GatewayRequestError(503, "INVALID_GATEWAY_CLOCK")
+    return value.astimezone(UTC)
+
+
 def _proof_expiry(proof: dict[str, Any], now: datetime, ttl_seconds: int) -> str:
     evidence = proof.get("evidence")
     if not isinstance(evidence, list) or not evidence:
@@ -253,12 +266,22 @@ def _admission_record(proof: dict[str, Any], *, now: datetime, ttl_seconds: int)
     )
 
 
+def _valid_store_token(token: object) -> bool:
+    return (
+        isinstance(token, str)
+        and bool(token)
+        and token == token.strip()
+        and "\x00" not in token
+        and len(token) <= 512
+    )
+
+
 def _extract_admission_token(request: Request) -> str:
     values = request.headers.getlist(_ADMISSION_HEADER)
     if len(values) != 1:
         raise GatewayRequestError(401, "ADMISSION_TOKEN_REQUIRED")
     token = values[0]
-    if not token or token != token.strip() or "\x00" in token or len(token) > 512:
+    if not _valid_store_token(token):
         raise GatewayRequestError(401, "INVALID_ADMISSION_TOKEN")
     return token
 
@@ -431,13 +454,15 @@ def create_gateway_app(
                 headers=_security_headers(),
             )
         try:
-            now = clock_fn().astimezone(UTC)
+            now = _clock_now(clock_fn)
             record = _admission_record(
                 proof,
                 now=now,
                 ttl_seconds=config.admission_ttl_seconds,
             )
             token = await run_in_threadpool(admission_store.reserve, record)
+            if not _valid_store_token(token):
+                raise GatewayRequestError(503, "INVALID_ADMISSION_TOKEN_FROM_STORE")
         except GatewayRequestError as exc:
             return _error_response(exc.status_code, exc.reason_code)
         except GatewayAdmissionStoreError as exc:
@@ -466,7 +491,9 @@ def create_gateway_app(
             record = await run_in_threadpool(admission_store.consume, token)
             if record is None:
                 raise GatewayRequestError(401, "ADMISSION_TOKEN_INVALID_OR_CONSUMED")
-            now = clock_fn().astimezone(UTC)
+            if not isinstance(record, GatewayAdmissionRecord):
+                raise GatewayRequestError(503, "INVALID_ADMISSION_RECORD_FROM_STORE")
+            now = _clock_now(clock_fn)
             if _record_is_expired(record, now):
                 raise GatewayRequestError(401, "ADMISSION_TOKEN_EXPIRED")
             _require_identity_encoding(request)
@@ -484,6 +511,8 @@ def create_gateway_app(
             )
             if not hmac.compare_digest(target.digest, record.target_digest):
                 raise GatewayRequestError(403, "GATEWAY_TARGET_DIGEST_MISMATCH")
+            if _record_is_expired(record, _clock_now(clock_fn)):
+                raise GatewayRequestError(401, "ADMISSION_TOKEN_EXPIRED")
         except GatewayRequestError as exc:
             return _error_response(exc.status_code, exc.reason_code)
         except GatewayTargetError as exc:
