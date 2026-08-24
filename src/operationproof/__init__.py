@@ -5,10 +5,9 @@ from .attestation import (
     HMAC_SHA256_V1,
     SIGNATURE_CONTRACT,
     SIGNED_ATTESTATION_CONTRACT,
-    GENESIS as ATTESTATION_GENESIS,
     AttestationSigner,
-    AttestationVerifier,
     AttestationVerificationResult,
+    AttestationVerifier,
     HMACSHA256Signer,
     HMACSHA256Verifier,
     ProvenanceVerificationResult,
@@ -20,6 +19,9 @@ from .attestation import (
     verify_attestation_integrity,
     verify_attestation_signature,
     verify_provenance_chain,
+)
+from .attestation import (
+    GENESIS as ATTESTATION_GENESIS,
 )
 from .attestation_store import (
     AttestationStore,
@@ -69,9 +71,9 @@ from .observability import (
     emit_telemetry_best_effort,
 )
 from .provenance import (
-    ProvenanceRecordResult,
     ProvenanceRecorder,
     ProvenanceRecorderError,
+    ProvenanceRecordResult,
     attest_execution_receipt,
     attest_final_proof,
 )
