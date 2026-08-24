@@ -232,7 +232,6 @@ def test_attested_gateway_upstream_failure_lifecycle() -> None:
 class _FailingStore(operationproof.AttestationStore):
     def head(self, operation_id: str):
         del operation_id
-        return None
 
     def append(
         self,
@@ -246,7 +245,6 @@ class _FailingStore(operationproof.AttestationStore):
 
     def read(self, operation_id: str, sequence: int):
         del operation_id, sequence
-        return None
 
 
 def test_required_gateway_provenance_failure_is_fail_closed_before_admission() -> None:
