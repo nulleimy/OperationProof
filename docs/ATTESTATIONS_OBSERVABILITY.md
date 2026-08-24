@@ -1,6 +1,6 @@
 # OperationProof R11 — signed provenance, observability, and attestations
 
-R11 adds cryptographic provenance and tamper-evident observability without changing OperationProof governance semantics.
+R11 adds cryptographic provenance and authenticated observability without changing OperationProof governance semantics.
 
 ## Non-negotiable boundary
 
@@ -76,22 +76,25 @@ R11 defines the portable chain contract. It does not require one deployment to u
 
 ## Observability
 
-`operationproof.observability-event.v1` is a canonical tamper-evident event envelope with:
+R11 deliberately separates a canonical telemetry payload from authenticated stored evidence.
 
-- event type;
-- RFC3339 occurrence time;
-- operation ID;
-- optional subject/artifact/attestation digests;
-- outcome;
-- bounded reason codes;
-- canonical attributes;
-- event digest.
+`operationproof.observability-event.v1` is the canonical event payload. Its `event_digest` is an integrity checksum and correlation identifier only. A self-contained checksum is **not** an authenticity or tamper-evidence claim because anyone able to rewrite the event could also recompute that digest.
 
-The in-memory sink is a bounded reference implementation that deep-snapshots caller-owned events before storing them.
+Authenticated telemetry uses `operationproof.signed-observability-event.v1`. It contains the exact canonical event plus:
 
-`assess_proof_observed()` returns both the normal SDK `ProofAssessment` and an independent telemetry emission result. Sink failure cannot change `ProofAssessment.accepted`.
+- exact `event_digest` binding;
+- signature algorithm;
+- explicit `key_id`;
+- domain-separated signature over the canonical event bytes;
+- canonical `signed_event_digest`.
 
-This is deliberate: deployments that require durable audit delivery before execution must enforce that requirement as explicit deployment policy. OperationProof does not silently rewrite authorization semantics because an observability backend is unavailable.
+`verify_signed_observability_event()` resolves the exact `(algorithm, key_id)` verifier and verifies the signature. Rewriting an event and recomputing both embedded digests does not validate without the trusted signing key.
+
+The reference `MemoryTelemetrySink` therefore requires an `AttestationTrustRegistry` and accepts only trusted signed observability envelopes. It is bounded, thread-safe, and deep-snapshots caller-owned signed events before storage.
+
+`assess_proof_observed()` returns both the normal SDK `ProofAssessment` and an independent telemetry emission result. A signer/sink failure, malformed telemetry attributes, or attacker-controlled oversized proof reason code cannot change or suppress the returned `ProofAssessment`. Oversized assessment reason codes are represented in telemetry by a deterministic reason digest.
+
+This separation is deliberate: deployments that require durable audit delivery before execution must enforce that requirement as explicit deployment policy. OperationProof does not silently rewrite authorization semantics because an observability backend is unavailable.
 
 ## Key management boundary
 
@@ -112,4 +115,12 @@ For a signed proof artifact, the safe order is:
 7. verify the signature;
 8. verify predecessor/operation/subject chain binding when a chain is supplied.
 
-No step can compensate for failure in an earlier semantic layer.
+For observability evidence:
+
+1. verify canonical event structure and `event_digest`;
+2. verify `signed_event_digest`;
+3. verify exact event-digest binding inside the signed envelope;
+4. resolve the exact `(algorithm, key_id)` verifier;
+5. verify the domain-separated event signature.
+
+No checksum, signature, or telemetry result can compensate for failure in an earlier governance semantic layer.
