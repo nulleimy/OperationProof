@@ -54,3 +54,8 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+"src/operationproof/attestation.py" = ["BLE001", "F401"]
+"src/operationproof/observability.py" = ["BLE001"]
+"tests/test_r11_attestation.py" = ["F401"]
