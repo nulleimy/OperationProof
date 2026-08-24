@@ -106,6 +106,10 @@ admission_created
   ↓
 admission_consumed
   ↓
+upstream_dispatch_prepared
+  ↓
+expiry recheck
+  ↓
 upstream_dispatched
   ↓
 upstream_completed | upstream_failed
@@ -116,6 +120,8 @@ final_proof_composed
 ```
 
 `operationproof.attestation.v1` binds one operation, one subject, one PRE proof anchor, one related artifact, issuer identity, timestamp, sequence, predecessor digest, payload digest, and its own canonical digest. Signatures are evaluated through explicit external signer/verifier adapters; OperationProof ships no global trust root.
+
+`upstream_dispatch_prepared` is a required durable pre-network barrier. The gateway rechecks admission expiry after that barrier and immediately before opening the upstream stream, so provenance persistence cannot reopen the R10 freshness TOCTOU window. `upstream_dispatched` is emitted only after the upstream stream is actually entered.
 
 Signing does not imply `VERIFIED`, authorization, or execution success. Required provenance persistence is distinct from best-effort telemetry export. See `docs/ATTESTATIONS.md` and `docs/OBSERVABILITY.md`.
 
@@ -151,7 +157,7 @@ R9 adds exact provider adapter manifests, duplicate-safe discovery, normalized-e
 
 R10 adds active gateway enforcement with canonical HTTP target binding, trusted PRE/v2 admission, one-time replay protection, startup-only upstream routing, bounded proxy I/O, and no integrity-only forwarding mode.
 
-R11 adds canonical attestations, explicit external signature trust, append-only provenance with replay/order/transplant protection, structured digest-only observability, required provenance persistence, best-effort telemetry, R10 gateway lifecycle integration, and execution/FINAL provenance helpers.
+R11 adds canonical attestations, explicit external signature trust, append-only provenance with replay/order/transplant protection, structured digest-only observability, required provenance persistence, best-effort telemetry, an expiry-safe pre-dispatch provenance barrier, R10 gateway lifecycle integration, and execution/FINAL provenance helpers.
 
 ## Local verification
 
