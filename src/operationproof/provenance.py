@@ -7,9 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .attestation import (
+    GENESIS,
     AttestationSigner,
     AttestationVerifier,
-    GENESIS,
     build_attestation,
     sign_attestation,
     verify_attestation_signature,
