@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi.testclient import TestClient
 
 import operationproof
+from operationproof.attested_gateway import create_attested_gateway_app
 from operationproof.canonical import sha256_digest
 from operationproof.domain import PRE_LAYERS
-from operationproof.attested_gateway import create_attested_gateway_app
 
 UPSTREAM_ID = "service-r11"
 BODY = b'{"hello":"r11"}'
@@ -122,6 +122,7 @@ def _app(
     provenance_store: operationproof.AttestationStore,
     telemetry: operationproof.TelemetrySink | None = None,
     upstream_client: httpx.AsyncClient,
+    gateway_clock=None,
 ):
     return create_attested_gateway_app(
         _registry(),
@@ -130,7 +131,7 @@ def _app(
         upstream_base_url="https://upstream.test",
         upstream_id=UPSTREAM_ID,
         forward_headers=("content-type",),
-        clock=lambda: NOW,
+        clock=gateway_clock or (lambda: NOW),
         http_client=upstream_client,
     )
 
@@ -181,6 +182,7 @@ def test_attested_gateway_success_lifecycle_and_chain() -> None:
         "proof_assessed",
         "admission_created",
         "admission_consumed",
+        "upstream_dispatch_prepared",
         "upstream_dispatched",
         "upstream_completed",
     ]
@@ -222,7 +224,7 @@ def test_attested_gateway_upstream_failure_lifecycle() -> None:
         "proof_assessed",
         "admission_created",
         "admission_consumed",
-        "upstream_dispatched",
+        "upstream_dispatch_prepared",
         "upstream_failed",
     ]
 
@@ -261,6 +263,71 @@ def test_required_gateway_provenance_failure_is_fail_closed_before_admission() -
 
     assert response.status_code == 503
     assert response.json()["reason_codes"] == ["PROVENANCE_PERSISTENCE_FAILED"]
+
+
+class _AdvanceClockOnPreparedStore(operationproof.MemoryAttestationStore):
+    def __init__(self, clock_state: list[datetime]) -> None:
+        super().__init__()
+        self._clock_state = clock_state
+
+    def append(
+        self,
+        signed_attestation,
+        *,
+        expected_sequence: int,
+        expected_previous_attestation_digest: str,
+    ):
+        result = super().append(
+            signed_attestation,
+            expected_sequence=expected_sequence,
+            expected_previous_attestation_digest=expected_previous_attestation_digest,
+        )
+        attestation = signed_attestation.get("attestation", {})
+        if attestation.get("artifact_type") == "upstream_dispatch_prepared":
+            self._clock_state[0] = NOW + timedelta(seconds=31)
+        return result
+
+
+def test_pre_dispatch_provenance_delay_rechecks_expiry_and_never_forwards() -> None:
+    clock_state = [NOW]
+    store = _AdvanceClockOnPreparedStore(clock_state)
+    seen: list[httpx.Request] = []
+    app = _app(
+        provenance_store=store,
+        upstream_client=_success_client(seen),
+        gateway_clock=lambda: clock_state[0],
+    )
+
+    with TestClient(app) as client:
+        token = _admit(client)
+        response = client.post(
+            "/v1/proxy/deploy?dry=0",
+            content=BODY,
+            headers={
+                "x-operationproof-admission": token,
+                "content-type": "application/json",
+            },
+        )
+        retry = client.post(
+            "/v1/proxy/deploy?dry=0",
+            content=BODY,
+            headers={
+                "x-operationproof-admission": token,
+                "content-type": "application/json",
+            },
+        )
+
+    assert response.status_code == 401
+    assert response.json()["reason_codes"] == ["ADMISSION_TOKEN_EXPIRED"]
+    assert retry.status_code == 401
+    assert retry.json()["reason_codes"] == ["ADMISSION_TOKEN_INVALID_OR_CONSUMED"]
+    assert seen == []
+    assert _event_types(store) == [
+        "proof_assessed",
+        "admission_created",
+        "admission_consumed",
+        "upstream_dispatch_prepared",
+    ]
 
 
 def test_client_cannot_select_provenance_signer_or_issuer() -> None:
