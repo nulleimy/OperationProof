@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://operationproof.dev/schemas/signed-attestation.v1.schema.json",
+  "title": "OperationProof Signed Attestation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "attestation", "signature"],
+  "properties": {
+    "schema": {"const": "operationproof.signed-attestation.v1"},
+    "attestation": {"$ref": "attestation.v1.schema.json"},
+    "signature": {"$ref": "attestation-signature.v1.schema.json"}
+  }
+}
