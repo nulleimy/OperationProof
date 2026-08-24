@@ -54,16 +54,20 @@ from .gateway_store import (
 )
 from .observability import (
     OBSERVABILITY_EVENT_SCHEMA,
+    SIGNED_OBSERVABILITY_EVENT_SCHEMA,
     MemoryTelemetrySink,
     ObservabilityEmitResult,
     ObservabilityError,
     ObservabilityEventType,
+    ObservabilityVerificationResult,
     TelemetrySink,
     TelemetrySinkError,
     assess_proof_observed,
     build_observability_event,
     emit_observability_event,
+    sign_observability_event,
     verify_observability_event,
+    verify_signed_observability_event,
 )
 from .provider import (
     PROVIDER_ADAPTER_CONTRACT,
@@ -105,6 +109,7 @@ __all__ = [
     "PROVIDER_ADAPTER_CONTRACT",
     "SDK_CONTRACT",
     "SIGNED_ATTESTATION_SCHEMA",
+    "SIGNED_OBSERVABILITY_EVENT_SCHEMA",
     "AdapterOutputValidationResult",
     "AttestationChainVerificationResult",
     "AttestationError",
@@ -129,6 +134,7 @@ __all__ = [
     "ObservabilityEmitResult",
     "ObservabilityError",
     "ObservabilityEventType",
+    "ObservabilityVerificationResult",
     "OperationSubject",
     "OperationSubjectError",
     "ProofAssessment",
@@ -169,6 +175,7 @@ __all__ = [
     "make_subject_bound_trust_verifier",
     "parse_proof_json",
     "run_provider_conformance",
+    "sign_observability_event",
     "sign_provenance_statement",
     "validate_adapter_output",
     "verify_attestation_chain",
@@ -178,4 +185,5 @@ __all__ = [
     "verify_proof_trust",
     "verify_provenance_statement",
     "verify_signed_attestation",
+    "verify_signed_observability_event",
 ]
